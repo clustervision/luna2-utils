@@ -17,26 +17,91 @@ __status__      = 'Development'
 
 
 #from flask import json, request
+import sys, getopt
 from builtins import dict
 import requests
 import re
+import json
 
 CONF=dict()
 
-regex = re.compile("^(.[^=]+)\s+?=\s+?(.*)$")
-with open("/trinity/local/luna/config/luna.ini") as f:
-    for line in f:
-        result = regex.match(line)
-        if (result):
-            CONF[result.group(1)]=result.group(2)
+# ----------------------------------------------------------------------------
 
-for key in CONF:
-    print(key, '->', CONF[key])
+def main(argv):
+    for i in range(0, len(argv)):
+        if (argv[i] == "-h"):
+             help()
+             exit()
+        else:
+             getStatus()
+    getStatus()
+    exit()
 
-token_credentials = {'username': "'"+CONF['USERNAME']+"'",'password': "'"+CONF['PASSWORD']+"'"}
+# ----------------------------------------------------------------------------
 
-x = requests.post('http://'+CONF["ENDPOINT"]+'/token', json = token_credentials)
-print(x.status_code)
+def help():
+    print ("""
+usage: lpower [-h] [--groups GROUPS] [--interface INTERFACE]
+              [hosts] {status,on,off,reset,cycle,identify,noidentify}
 
-r = requests.get('http://'+CONF["ENDPOINT"]+'/get/control/power/node001') #, auth=('user', 'pass'))
-print(r.status_code)
+BMC power management.
+
+positional arguments:
+  hosts                 Host list
+  {status,on,off,reset,cycle,identify,noidentify}
+                        Action
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --groups GROUPS, -g GROUPS
+                        Group list
+  --interface INTERFACE, -i INTERFACE
+                        Interface to use instead of "BMC"
+    """)
+
+
+def readConfigFile():
+    regex = re.compile("^(.[^=]+)\s+?=\s+?(.*)$")
+    with open("/trinity/local/luna/config/luna.ini") as f:
+        for line in f:
+            result = regex.match(line)
+            if (result):
+                CONF[result.group(1)]=result.group(2)
+
+    for key in CONF:
+        print(key, '->', CONF[key])
+
+
+def getToken():
+    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF)):
+        readConfigFile()
+
+    token_credentials = {'username': CONF['USERNAME'],'password': CONF['PASSWORD']}
+
+    x = requests.post('http://'+CONF["ENDPOINT"]+'/token', json = token_credentials)
+    print(str(x.status_code)+' ::: '+x.text)
+
+    DATA=json.loads(x.text)
+    CONF["TOKEN"]=DATA["token"]
+
+
+def getStatus(nodes=None):
+    if ('TOKEN' not in CONF):
+        getToken()
+    if ('ENDPOINT' not in CONF):
+        readConfigFile()
+
+    headers = {'x-access-tokens': CONF['TOKEN']}
+    print(headers)
+
+    r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/status',headers=headers) #, auth=('user', 'pass'))
+    print(str(r.status_code)+' ::: '+r.text)
+
+
+    r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/_on',headers=headers)
+    print(str(r.status_code)+' ::: '+r.text)
+
+
+main(sys.argv[1:])
+
+
