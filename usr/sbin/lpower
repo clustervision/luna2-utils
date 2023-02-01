@@ -100,39 +100,32 @@ def getToken():
         readConfigFile()
 
     token_credentials = {'username': CONF['USERNAME'],'password': CONF['PASSWORD']}
-
     x = requests.post('http://'+CONF["ENDPOINT"]+'/token', json = token_credentials)
-#    print(str(x.status_code)+' ::: '+x.text)
-
     DATA=json.loads(x.text)
     CONF["TOKEN"]=DATA["token"]
 
 
 # ----------------------------------------------------------------------------
 
-def getStatus(nodes=None):
-    if ('TOKEN' not in CONF):
-        getToken()
-    if ('ENDPOINT' not in CONF):
-        readConfigFile()
-
-    headers = {'x-access-tokens': CONF['TOKEN']}
-#    print(headers)
-
-    r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/status',headers=headers) #, auth=('user', 'pass'))
-    print(str(r.status_code)+' ::: '+r.text)
-
-
-    r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/_on',headers=headers)
-    print(str(r.status_code)+' ::: '+r.text)
-
-
-# ----------------------------------------------------------------------------
-
 def handleRequest(nodes=None,groups=None,interface=None,action=None):
-    print("Nodes="+str(nodes)+", groups="+str(groups)+", action="+str(action))
     if ((not nodes is None) and (not action is None)):
-        getStatus(nodes)
+        if ('TOKEN' not in CONF):
+            getToken()
+        if ('ENDPOINT' not in CONF):
+            readConfigFile()
+
+        headers = {'x-access-tokens': CONF['TOKEN']}
+
+        regex = re.compile("^([a-zA-Z0-9_]+)$")
+        result = regex.match(nodes)
+
+        if (result and nodes == result.group(1)):
+            r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/'+action,headers=headers)
+        else:
+            body = {'control': { 'power': { action: { 'hostlist': nodes } } } }
+            r = requests.post('http://'+CONF["ENDPOINT"]+'/control/power', json=body, headers=headers)
+
+        print(str(r.status_code)+' ::: '+r.text)
 
 # ----------------------------------------------------------------------------
 
