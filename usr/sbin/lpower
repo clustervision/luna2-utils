@@ -13,10 +13,8 @@ __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
+#VERSION: 0.1
 
-
-
-#from flask import json, request
 import sys, getopt
 from builtins import dict
 import requests
@@ -25,19 +23,40 @@ import json
 
 CONF=dict()
 
-# ----------------------------------------------------------------------------
+# ============================================================================
 
 def main(argv):
+    NODES=None
+    GROUPS=None
+    INTERFACES=None
+    ACTION=None
     for i in range(0, len(argv)):
-        if (argv[i] == "-h"):
+#        print("ARGC ["+str(i)+"]: ["+argv[i]+"]")
+        if (argv[i] == "-h" or argv[i] == "--help"):
              help()
              exit()
+        elif (argv[i] == "-g" or argv[i] == "--groups"):
+             i+=1
+             GROUPS=argv[i]
+        elif (argv[i] and not NODES):
+             NODES=argv[i]
+        elif (argv[i] in ['status','on','off','reset','cycle','identify','noidentify']):
+             ACTION=argv[i]
         else:
-             getStatus()
-    getStatus()
+             print("Error: Invalid options used.")
+             help()
+             exit()
+    if (len(argv) == 0):
+        help()
+        exit()
+    if ((NODES is None) or (ACTION is None)):
+        print("Error: Instruction incomplete. Nodes and Task expected.")
+        help()
+        exit()
+    handleRequest(nodes=NODES,groups=GROUPS,action=ACTION)
     exit()
 
-# ----------------------------------------------------------------------------
+# ============================================================================
 
 def help():
     print ("""
@@ -60,6 +79,8 @@ optional arguments:
     """)
 
 
+# ----------------------------------------------------------------------------
+
 def readConfigFile():
     regex = re.compile("^(.[^=]+)\s+?=\s+?(.*)$")
     with open("/trinity/local/luna/config/luna.ini") as f:
@@ -68,9 +89,11 @@ def readConfigFile():
             if (result):
                 CONF[result.group(1)]=result.group(2)
 
-    for key in CONF:
-        print(key, '->', CONF[key])
+#    for key in CONF:
+#        print(key, '->', CONF[key])
 
+
+# ----------------------------------------------------------------------------
 
 def getToken():
     if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF)):
@@ -79,11 +102,13 @@ def getToken():
     token_credentials = {'username': CONF['USERNAME'],'password': CONF['PASSWORD']}
 
     x = requests.post('http://'+CONF["ENDPOINT"]+'/token', json = token_credentials)
-    print(str(x.status_code)+' ::: '+x.text)
+#    print(str(x.status_code)+' ::: '+x.text)
 
     DATA=json.loads(x.text)
     CONF["TOKEN"]=DATA["token"]
 
+
+# ----------------------------------------------------------------------------
 
 def getStatus(nodes=None):
     if ('TOKEN' not in CONF):
@@ -92,7 +117,7 @@ def getStatus(nodes=None):
         readConfigFile()
 
     headers = {'x-access-tokens': CONF['TOKEN']}
-    print(headers)
+#    print(headers)
 
     r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/status',headers=headers) #, auth=('user', 'pass'))
     print(str(r.status_code)+' ::: '+r.text)
@@ -101,6 +126,15 @@ def getStatus(nodes=None):
     r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/_on',headers=headers)
     print(str(r.status_code)+' ::: '+r.text)
 
+
+# ----------------------------------------------------------------------------
+
+def handleRequest(nodes=None,groups=None,interface=None,action=None):
+    print("Nodes="+str(nodes)+", groups="+str(groups)+", action="+str(action))
+    if ((not nodes is None) and (not action is None)):
+        getStatus(nodes)
+
+# ----------------------------------------------------------------------------
 
 main(sys.argv[1:])
 
