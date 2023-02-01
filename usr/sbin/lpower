@@ -82,12 +82,23 @@ optional arguments:
 # ----------------------------------------------------------------------------
 
 def readConfigFile():
+    read=0
+    api = re.compile("^(\[API\])")
     regex = re.compile("^(.[^=]+)\s+?=\s+?(.*)$")
-    with open("/trinity/local/luna/config/luna.ini") as f:
-        for line in f:
-            result = regex.match(line)
-            if (result):
-                CONF[result.group(1)]=result.group(2)
+    try:
+        with open("/trinity/local/luna/config/luna.ini") as f:
+            for line in f:
+                if (not read):
+                    result = api.match(line)
+                    if (result):
+                        read=1
+                else:
+                    result = regex.match(line)
+                    if (result):
+                        CONF[result.group(1)]=result.group(2)
+    except:
+        print("Error: /trinity/local/luna/config/luna.ini Does not exist and i cannot continue\n")
+        exit(1)
 
 #    for key in CONF:
 #        print(key, '->', CONF[key])
@@ -96,14 +107,29 @@ def readConfigFile():
 # ----------------------------------------------------------------------------
 
 def getToken():
-    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF)):
+    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
         readConfigFile()
+    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
+        print("Error: username/password/endpoint not found in config file. i cannot continue\n")
+        exit(2)
 
     token_credentials = {'username': CONF['USERNAME'],'password': CONF['PASSWORD']}
-    x = requests.post('http://'+CONF["ENDPOINT"]+'/token', json = token_credentials)
-    DATA=json.loads(x.text)
-    CONF["TOKEN"]=DATA["token"]
-
+    try:
+        x = requests.post('http://'+CONF["ENDPOINT"]+'/token', json = token_credentials)
+        DATA=json.loads(x.text)
+        CONF["TOKEN"]=DATA["token"]
+    except requests.exceptions.HTTPError as err:
+        print("Error: trouble getting my token: "+str(err))
+        exit(3)
+    except requests.exceptions.ConnectionError as err:
+        print("Error: trouble getting my token: "+str(err))
+        exit(3)
+    except requests.exceptions.Timeout as err:
+        print("Error: trouble getting my token: "+str(err))
+        exit(3)
+    except:
+        print("Error: trouble getting my token for unknown reasons")
+        exit(3)
 
 # ----------------------------------------------------------------------------
 
