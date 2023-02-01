@@ -13,7 +13,7 @@ __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
-#VERSION: 0.2
+#VERSION: 0.2.1
 
 import sys, getopt
 from builtins import dict
@@ -163,10 +163,11 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
             if (r.text):
                 DATA=json.loads(r.text)
                 if (type(DATA) is dict):
-                    for control in DATA.keys:
-                        for power in DATA[control].keys:
-                            for result in DATA[control][power].keys:
-                                print(str(DATA[control][power][result]['hostlist'])+": "+str(result))
+                    for control in DATA.keys():
+                        for power in DATA[control].keys():
+                            for status in DATA[control][power].keys():
+                                for hostlist in DATA[control][power][status].keys():
+                                    print(str(DATA[control][power][status][hostlist])+": "+str(status))
                 else:
                     print(str(r.status_code)+' ::: '+r.text)
             else:
