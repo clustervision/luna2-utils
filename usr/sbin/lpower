@@ -13,7 +13,7 @@ __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
-#VERSION: 0.2.1
+#VERSION: 0.2.2
 
 import sys, getopt
 from builtins import dict
@@ -100,9 +100,6 @@ def readConfigFile():
         print("Error: /trinity/local/luna/config/luna.ini Does not exist and i cannot continue\n")
         exit(1)
 
-#    for key in CONF:
-#        print(key, '->', CONF[key])
-
 
 # ----------------------------------------------------------------------------
 
@@ -113,9 +110,14 @@ def getToken():
         print("Error: username/password/endpoint not found in config file. i cannot continue\n")
         exit(2)
 
+    RET={'401': 'invalid credentials', '400': 'bad request'}
+
     token_credentials = {'username': CONF['USERNAME'],'password': CONF['PASSWORD']}
     try:
         x = requests.post('http://'+CONF["ENDPOINT"]+'/token', json = token_credentials)
+        if (str(x.status_code) in RET):
+            print("Error: "+RET[str(x.status_code)])
+            exit(4)
         DATA=json.loads(x.text)
         CONF["TOKEN"]=DATA["token"]
     except requests.exceptions.HTTPError as err:
@@ -127,9 +129,11 @@ def getToken():
     except requests.exceptions.Timeout as err:
         print("Error: trouble getting my token: "+str(err))
         exit(3)
-    except:
-        print("Error: trouble getting my token for unknown reasons")
-        exit(3)
+#    Below commented out as this catch all will also catch legit responses for e.g. 401 and 404
+#    except:
+#        print("Error: trouble getting my token for unknown reasons")
+#        exit(3)
+    
 
 # ----------------------------------------------------------------------------
 
@@ -140,6 +144,8 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
         if ('ENDPOINT' not in CONF):
             readConfigFile()
 
+        RET={'404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
+
         headers = {'x-access-tokens': CONF['TOKEN']}
 
         regex = re.compile("^([a-zA-Z0-9_]+)$")
@@ -148,19 +154,25 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
 
         if (result and nodes == result.group(1)):
             r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/'+action,headers=headers)
+            status_code=str(r.status_code)
             if (r.text):
                 DATA=json.loads(r.text)
-            if (str(r.status_code) == "204"):
-                print(nodes+": succes "+action)
+            if (status_code == "204"):
+                print(nodes+": "+action)
+            elif (status_code in RET):
+                print(nodes+": failed: "+RET[status_code])
             elif('control' in DATA):
-                print(nodes+": "+str(DATA['control']['status']))
+                print(nodes+": "+str(DATA['control']['status'] or 'no results returned'))
             else:
                 # when we don't know how to handle the returned data
-                print("["+str(r.status_code)+'] ::: '+r.text)
+                print("["+status_code+'] ::: '+r.text)
         else:
             body = {'control': { 'power': { action: { 'hostlist': nodes } } } }
             r = requests.post('http://'+CONF["ENDPOINT"]+'/control/power', json=body, headers=headers)
-            if (r.text):
+            status_code=str(r.status_code)
+            if (status_code in RET):
+                print(nodes+": failed: "+RET[status_code])
+            elif (r.text):
                 DATA=json.loads(r.text)
                 if (type(DATA) is dict):
                     for control in DATA.keys():
@@ -169,9 +181,11 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
                                 for hostlist in DATA[control][power][status].keys():
                                     print(str(DATA[control][power][status][hostlist])+": "+str(status))
                 else:
-                    print(str(r.status_code)+' ::: '+r.text)
+                    # when we don't know how to handle the returned data
+                    print(status_code+' ::: '+r.text)
             else:
-                print(str(r.status_code)+' ::: '+r.text)
+                # when we don't know how to handle the returned data
+                print(status_code+' ::: '+r.text)
 
 # ----------------------------------------------------------------------------
 
