@@ -13,7 +13,7 @@ __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
-#VERSION: 0.2.2
+#VERSION: 0.2.3
 
 import sys, getopt
 from builtins import dict
@@ -31,7 +31,6 @@ def main(argv):
     INTERFACES=None
     ACTION=None
     for i in range(0, len(argv)):
-#        print("ARGC ["+str(i)+"]: ["+argv[i]+"]")
         if (argv[i] == "-h" or argv[i] == "--help"):
              help()
              exit()
@@ -97,18 +96,18 @@ def readConfigFile():
                     if (result):
                         CONF[result.group(1)]=result.group(2)
     except:
-        print("Error: /trinity/local/luna/config/luna.ini Does not exist and i cannot continue\n")
+        print("Error: /trinity/local/luna/config/luna.ini Does not exist and i cannot continue.")
         exit(1)
 
+    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
+        print("Error: username/password/endpoint not found in config file. i cannot continue.")
+        exit(2)
 
 # ----------------------------------------------------------------------------
 
 def getToken():
     if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
         readConfigFile()
-    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
-        print("Error: username/password/endpoint not found in config file. i cannot continue\n")
-        exit(2)
 
     RET={'401': 'invalid credentials', '400': 'bad request'}
 
@@ -119,6 +118,9 @@ def getToken():
             print("Error: "+RET[str(x.status_code)])
             exit(4)
         DATA=json.loads(x.text)
+        if (not 'token' in DATA):
+            print("Error: i did not receive a token. i cannot continue.")
+            exit(5)
         CONF["TOKEN"]=DATA["token"]
     except requests.exceptions.HTTPError as err:
         print("Error: trouble getting my token: "+str(err))
@@ -131,7 +133,7 @@ def getToken():
         exit(3)
 #    Below commented out as this catch all will also catch legit responses for e.g. 401 and 404
 #    except:
-#        print("Error: trouble getting my token for unknown reasons")
+#        print("Error: trouble getting my token for unknown reasons.")
 #        exit(3)
     
 
