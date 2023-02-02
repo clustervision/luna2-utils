@@ -15,7 +15,7 @@ __status__      = 'Development'
 
 #VERSION: 0.2.3
 
-import sys, getopt
+import sys
 from builtins import dict
 import requests
 import re
@@ -32,19 +32,19 @@ def main(argv):
     ACTION=None
     for i in range(0, len(argv)):
         if (argv[i] == "-h" or argv[i] == "--help"):
-             help()
-             exit()
+            help()
+            exit()
         elif (argv[i] == "-g" or argv[i] == "--groups"):
-             i+=1
-             GROUPS=argv[i]
+            i+=1
+            GROUPS=argv[i]
         elif (argv[i] and not NODES):
-             NODES=argv[i]
+            NODES=argv[i]
         elif (argv[i] in ['status','on','off','reset','cycle','identify','noidentify']):
-             ACTION=argv[i]
+            ACTION=argv[i]
         else:
-             print("Error: Invalid options used.")
-             help()
-             exit()
+            print("Error: Invalid options used.")
+            help()
+            exit()
     if (len(argv) == 0):
         help()
         exit()
