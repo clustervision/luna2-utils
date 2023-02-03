@@ -20,6 +20,7 @@ from builtins import dict
 import requests
 import re
 import json
+from time import sleep
 
 CONF={}
 
@@ -172,16 +173,39 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
             body = {'control': { 'power': { action: { 'hostlist': nodes } } } }
             r = requests.post('http://'+CONF["ENDPOINT"]+'/control/power', json=body, headers=headers)
             status_code=str(r.status_code)
+            #print(f"DEBUG: {r.text}")
             if (status_code in RET):
                 print(nodes+": failed: "+RET[status_code])
             elif (r.text):
                 DATA=json.loads(r.text)
-                if (type(DATA) is dict):
-                    for control in DATA.keys():
-                        for power in DATA[control].keys():
-                            for status in DATA[control][power].keys():
-                                for hostlist in DATA[control][power][status].keys():
-                                    print(str(DATA[control][power][status][hostlist])+": "+str(status))
+                request_id=handleResults(DATA)
+#                return
+#                if (type(DATA) is dict):
+#                    for control in DATA.keys():
+#                        for power in DATA[control].keys():
+#                            for status in DATA[control][power].keys():
+#                                if 'hostlist' in DATA[control][power][status]:
+#                                    for hostlist in DATA[control][power][status].keys():
+#                                        if len(DATA[control][power][status][hostlist]) > 0:
+#                                            list=str(DATA[control][power][status][hostlist]).split(',')
+#                                            for node in list:
+#                                                print(f"{node}: {status}")
+#                                if 'request_id' in DATA[control][power][status]:
+#                                    request_id=str(DATA[control][power][status]['request_id'])
+                # ------------- loop to keep polling for updates. needs a seperate function? --------------------
+
+                while r.status_code == 200:
+                    sleep(2)
+                    r = requests.get('http://'+CONF["ENDPOINT"]+'/control/status/'+str(request_id),headers=headers)
+                    status_code=str(r.status_code)
+                    if (r.status_code!=200):
+                        return
+                    if (r.text):
+                        #print(f"DEBUG: {r.text}")
+                        DATA=json.loads(r.text)
+                        handleResults(DATA)
+
+                # -----------------------------------------------------------------------------------------------
                 else:
                     # when we don't know how to handle the returned data
                     print(status_code+' ::: '+r.text)
@@ -190,6 +214,26 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
                 print(status_code+' ::: '+r.text)
     else:
         print("Error: not enough parameters to run with")
+
+# ----------------------------------------------------------------------------
+
+def handleResults(DATA,request_id=None):
+    request_id=0
+    if (type(DATA) is dict):
+        for control in DATA.keys():
+            for power in DATA[control].keys():
+                if 'request_id' in DATA[control][power]:
+                    request_id=str(DATA[control][power]['request_id'])
+                    #print(f"Request_id: [{request_id}]")
+                    next
+                for status in DATA[control][power].keys():
+                    if 'hostlist' in DATA[control][power][status]:
+                        for hostlist in DATA[control][power][status].keys():
+                            if len(DATA[control][power][status][hostlist]) > 0:
+                                list=str(DATA[control][power][status][hostlist]).split(',')
+                                for node in list:
+                                    print(f"{node}: {status}")
+    return request_id
 
 # ----------------------------------------------------------------------------
 
