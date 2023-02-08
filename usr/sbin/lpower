@@ -155,6 +155,7 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
         result = regex.match(nodes)
         DATA = ''
 
+        # single node query we do with GET
         if (result and nodes == result.group(1)):
             try:
                 r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/'+action,headers=headers)
@@ -171,14 +172,15 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
                     # when we don't know how to handle the returned data
                     print("["+status_code+'] ::: '+r.text)
             except requests.exceptions.HTTPError as err:
-                print("Error: trouble getting my token: "+str(err))
+                print("Error: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.ConnectionError as err:
-                print("Error: trouble getting my token: "+str(err))
+                print("Error: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.Timeout as err:
-                print("Error: trouble getting my token: "+str(err))
+                print("Error: trouble getting results: "+str(err))
                 exit(3)
+        # else, we have to work with a list. backend offloads this but we have to keep polling for updates
         else:
             try:
                 body = {'control': { 'power': { action: { 'hostlist': nodes } } } }
@@ -205,13 +207,13 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
                     # when we don't know how to handle the returned data
                     print(status_code+' ::: '+r.text)
             except requests.exceptions.HTTPError as err:
-                print("Error: trouble getting my token: "+str(err))
+                print("Error: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.ConnectionError as err:
-                print("Error: trouble getting my token: "+str(err))
+                print("Error: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.Timeout as err:
-                print("Error: trouble getting my token: "+str(err))
+                print("Error: trouble getting results: "+str(err))
                 exit(3)
             else:
                 # when we don't know how to handle the returned data
