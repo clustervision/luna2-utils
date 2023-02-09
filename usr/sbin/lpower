@@ -147,7 +147,7 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
         if ('ENDPOINT' not in CONF):
             readConfigFile()
 
-        RET={'404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
+        RET={'400': 'invalid request', '404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
 
         headers = {'x-access-tokens': CONF['TOKEN']}
 
@@ -215,9 +215,6 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
             except requests.exceptions.Timeout as err:
                 print("Error: trouble getting results: "+str(err))
                 exit(3)
-            else:
-                # when we don't know how to handle the returned data
-                print(status_code+' ::: '+r.text)
     else:
         print("Error: not enough parameters to run with")
 
