@@ -147,7 +147,7 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
         if ('ENDPOINT' not in CONF):
             readConfigFile()
 
-        RET={'404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
+        RET={'400': 'invalid request', '404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
 
         headers = {'x-access-tokens': CONF['TOKEN']}
 
@@ -155,63 +155,66 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
         result = regex.match(nodes)
         DATA = ''
 
+        # single node query we do with GET
         if (result and nodes == result.group(1)):
-            r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/'+action,headers=headers)
-            status_code=str(r.status_code)
-            if (r.text):
-                DATA=json.loads(r.text)
-            if (status_code == "204"):
-                print(nodes+": "+action)
-            elif (status_code in RET):
-                print(nodes+": failed: "+RET[status_code])
-            elif('control' in DATA):
-                print(nodes+": "+str(DATA['control']['status'] or 'no results returned'))
-            else:
-                # when we don't know how to handle the returned data
-                print("["+status_code+'] ::: '+r.text)
+            try:
+                r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/'+action,headers=headers)
+                status_code=str(r.status_code)
+                if (r.text):
+                    DATA=json.loads(r.text)
+                if (status_code == "204"):
+                    print(nodes+": "+action)
+                elif (status_code in RET):
+                    print(nodes+": failed: "+RET[status_code])
+                elif('control' in DATA):
+                    print(nodes+": "+str(DATA['control']['status'] or 'no results returned'))
+                else:
+                    # when we don't know how to handle the returned data
+                    print("["+status_code+'] ::: '+r.text)
+            except requests.exceptions.HTTPError as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
+            except requests.exceptions.ConnectionError as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
+            except requests.exceptions.Timeout as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
+        # else, we have to work with a list. backend offloads this but we have to keep polling for updates
         else:
-            body = {'control': { 'power': { action: { 'hostlist': nodes } } } }
-            r = requests.post('http://'+CONF["ENDPOINT"]+'/control/power', json=body, headers=headers)
-            status_code=str(r.status_code)
-            #print(f"DEBUG: {r.text}")
-            if (status_code in RET):
-                print(nodes+": failed: "+RET[status_code])
-            elif (r.text):
-                DATA=json.loads(r.text)
-                request_id=handleResults(DATA)
-#                return
-#                if (type(DATA) is dict):
-#                    for control in DATA.keys():
-#                        for power in DATA[control].keys():
-#                            for status in DATA[control][power].keys():
-#                                if 'hostlist' in DATA[control][power][status]:
-#                                    for hostlist in DATA[control][power][status].keys():
-#                                        if len(DATA[control][power][status][hostlist]) > 0:
-#                                            list=str(DATA[control][power][status][hostlist]).split(',')
-#                                            for node in list:
-#                                                print(f"{node}: {status}")
-#                                if 'request_id' in DATA[control][power][status]:
-#                                    request_id=str(DATA[control][power][status]['request_id'])
-                # ------------- loop to keep polling for updates. needs a seperate function? --------------------
-
-                while r.status_code == 200:
-                    sleep(2)
-                    r = requests.get('http://'+CONF["ENDPOINT"]+'/control/status/'+str(request_id),headers=headers)
-                    status_code=str(r.status_code)
-                    if (r.status_code!=200):
-                        return
-                    if (r.text):
-                        #print(f"DEBUG: {r.text}")
-                        DATA=json.loads(r.text)
-                        handleResults(DATA)
-
-                # -----------------------------------------------------------------------------------------------
+            try:
+                body = {'control': { 'power': { action: { 'hostlist': nodes } } } }
+                r = requests.post('http://'+CONF["ENDPOINT"]+'/control/power', json=body, headers=headers)
+                status_code=str(r.status_code)
+                if (status_code in RET):
+                    print(nodes+": failed: "+RET[status_code])
+                elif (r.text):
+                    DATA=json.loads(r.text)
+                    request_id=handleResults(DATA)
+                    # ------------- loop to keep polling for updates. -----------------------------------------------
+                    while r.status_code == 200:
+                        sleep(2)
+                        r = requests.get('http://'+CONF["ENDPOINT"]+'/control/status/'+str(request_id),headers=headers)
+                        status_code=str(r.status_code)
+                        if (r.status_code!=200):
+                            return
+                        if (r.text):
+                            #print(f"DEBUG: {r.text}")
+                            DATA=json.loads(r.text)
+                            handleResults(DATA)
+                    # -----------------------------------------------------------------------------------------------
                 else:
                     # when we don't know how to handle the returned data
                     print(status_code+' ::: '+r.text)
-            else:
-                # when we don't know how to handle the returned data
-                print(status_code+' ::: '+r.text)
+            except requests.exceptions.HTTPError as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
+            except requests.exceptions.ConnectionError as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
+            except requests.exceptions.Timeout as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
     else:
         print("Error: not enough parameters to run with")
 
