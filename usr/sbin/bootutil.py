@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-import requests
-import base64
-import json
 import sys
 import os
+import base64
+import json
+import requests
 
 httpuser = ""
 httppassword = ""
@@ -61,7 +61,7 @@ def get_bootorder(system):
     bootdata = systemdata["Boot"]
     bootorder = bootdata["BootOrder"]
     return bootorder
-    
+
 def get_system_etag(system):
     # Get the etag of the specified system
     systemdata = redfish_get(f"{host}/redfish/v1/Systems/{system}")
@@ -71,17 +71,12 @@ def get_system_etag(system):
 def set_bootorder(system, etag, bootorder):
     # Set the boot order of the specified system
     url = f"{host}/redfish/v1/Systems/{system}"
-#    json_bootorder = []
-#    for bootoption in bootorder:
-#        json_bootorder.append(json.dumps(bootoption))
     json_data = {
-      "BootOrder" : bootorder
+        "BootOrder" : bootorder
     }
     json_data = {
-      "Boot" : json_data
+        "Boot" : json_data
     }
-#    json_data = json.dump({"BootOrder": json_bootorder})
-#    json_data = json.dump({"Boot": json_data})
     jsonstr = json.dumps(json_data)
     result = redfish_patch(url, etag, jsonstr)
     return result
@@ -143,7 +138,8 @@ if display_help:
     print("  get          -- get current boot order", file=sys.stderr)
     print("  set <order>  -- set current boot order\n", file=sys.stderr)
     print("Available [options...]:", file=sys.stderr)
-    print(" -H, --host      -- Redfish host. Must include protocol, e.g. https://host", file=sys.stderr)
+    print(" -H, --host      -- Redfish host. Must include protocol, e.g. https://host",
+          file=sys.stderr)
     print(" -U, --user      -- HTTP user name", file=sys.stderr)
     print(" -P, --password  -- HTTP user password", file=sys.stderr)
     sys.exit(1)
@@ -153,38 +149,38 @@ if display_help:
 
 sy_urls = get_system_urls(host)
 if len(sy_urls) == 1:
-        system = os.path.basename(sy_urls[0])
+    system = os.path.basename(sy_urls[0])
 bo_urls = get_bootoption_urls(host, system)
 
 if mode == "list":
-	print("Available boot devices:")
-	print("")
-	print("ID    |Name            |Desc")
-	print("------+----------------+------------------------------------------------------")
+    print("Available boot devices:")
+    print("")
+    print("ID    |Name            |Desc")
+    print("------+----------------+------------------------------------------------------")
 
 bootoption = {}
 for bo_url in bo_urls:
-	id, name, desc = get_boot_option_id_name_desc(bo_url)
-	bootoption[name] = desc
-	if mode == "list":
-		print(f"{i:<6}|{name:<16}|{desc:<58}")
+    id, name, desc = get_boot_option_id_name_desc(bo_url)
+    bootoption[name] = desc
+    if mode == "list":
+        print(f"{i:<6}|{name:<16}|{desc:<58}")
 
 #Retrieve and output the current boot order
 
 if mode == "get":
-	print("Current boot order:")
-	bootorder = get_bootorder(system)
-	i = 1
-	for bo in bootorder:
-		print(f"{i} - {bo} {bootoption[bo]}")
-		i += 1
+    print("Current boot order:")
+    bootorder = get_bootorder(system)
+    i = 1
+    for bo in bootorder:
+        print(f"{i} - {bo} {bootoption[bo]}")
+        i += 1
 
 #Set the boot order
 
 if mode == "set":
-	etag = get_system_etag(system)
-	ncode, code = set_bootorder(system, etag, desired_bootorder)
-	if ncode>=200 and ncode<300:
-		print(f'Set boot order to "{desired_bootorder}" successful! (HTTP-result: {code})')
-	else:
-		print(f'Set boot order to "{desired_bootorder}" failed! (HTTP-result: {code})')
+    etag = get_system_etag(system)
+    ncode, code = set_bootorder(system, etag, desired_bootorder)
+    if ncode>=200 and ncode<300:
+        print(f'Set boot order to "{desired_bootorder}" successful! (HTTP-result: {code})')
+    else:
+        print(f'Set boot order to "{desired_bootorder}" failed! (HTTP-result: {code})')
