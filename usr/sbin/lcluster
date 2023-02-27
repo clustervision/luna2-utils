@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+lcluster Class Trinity Project
+"""
+__author__      = "Sumit Sharma"
+__copyright__   = "Copyright 2022, Luna2 Project [CLI]"
+__license__     = "GPL"
+__version__     = "2.0"
+__maintainer__  = "Sumit Sharma"
+__email__       = "sumit.sharma@clustervision.com"
+__status__      = "Development"
+
+
+from argparse import ArgumentParser
+from health.healthstatus import HealthStatus
+from health.sensu import Sensu
+from health.utils import Utils
+
+class LCluster(object):
+    """
+    LCluster Class responsible to all Monitoring
+    activities.
+    """
+
+    def __init__(self):
+        """
+        Default variables should be here
+        before calling the any method.
+        """
+        self.parser = None
+        self.args = None
+        self.node = None
+
+
+    def main(self):
+        """
+        Main method to fetch and provide the arguments
+        for each class.
+        """
+        self.parser = ArgumentParser(prog='lcluster', description='Health Check Luna Cluster')
+        self.parser.add_argument('-n', '--noneed', action='store_true', help='Not Applicable')
+        self.args = vars(self.parser.parse_args())
+        self.health_checkup()
+        return True
+
+
+    def health_checkup(self):
+        """
+        Method to call the class for further
+        operations.
+        """
+        Sensu()
+        node_list, node_health = [], {}
+        get_node_list = Utils().get_data('config', 'node')
+        if get_node_list:
+            for node in get_node_list['config']['node']:
+                hostname = get_node_list['config']['node'][node]['hostname']
+                # print(node)
+                node_list.append(hostname)
+            print(node_list)
+        if node_list:
+            for node in node_list:
+                # self.node = node
+                self.node = 'fedora'
+                node_health = HealthStatus(self.node).status()
+        print(node_health)
+
+
+if __name__ == "__main__":
+    LCluster().main()
