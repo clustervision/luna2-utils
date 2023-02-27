@@ -17,6 +17,9 @@ from argparse import ArgumentParser
 from health.healthstatus import HealthStatus
 from health.sensu import Sensu
 from health.utils import Utils
+from threading import Thread
+import time
+
 
 class LCluster(object):
     """
@@ -32,6 +35,7 @@ class LCluster(object):
         self.parser = None
         self.args = None
         self.node = None
+        self.response = []
 
 
     def main(self):
@@ -40,7 +44,8 @@ class LCluster(object):
         for each class.
         """
         self.parser = ArgumentParser(prog='lcluster', description='Health Check Luna Cluster')
-        self.parser.add_argument('-n', '--noneed', action='store_true', help='Not Applicable')
+        self.parser.add_argument('-d', '--detail', action='store_true', help='See the detailed view')
+        self.parser.add_argument('-v', '--verbose', action='store_true', help='See the Debug Information')
         self.args = vars(self.parser.parse_args())
         self.health_checkup()
         return True
@@ -52,21 +57,44 @@ class LCluster(object):
         operations.
         """
         Sensu()
-        node_list, node_health = [], {}
+        node_list, node_health = [], []
         get_node_list = Utils().get_data('config', 'node')
         if get_node_list:
             for node in get_node_list['config']['node']:
                 hostname = get_node_list['config']['node'][node]['hostname']
-                # print(node)
                 node_list.append(hostname)
             print(node_list)
         if node_list:
             for node in node_list:
-                # self.node = node
-                self.node = 'fedora'
-                node_health = HealthStatus(self.node).status()
-        print(node_health)
+                self.node = node
+                # self.node = 'fedora'
+                health = Thread(target = self.get_status)
+                health.start()
+                health.join()
+                # thread_response = health.join()
+                # return_value = HealthStatus(self.node).status()
+                print(self.response)
+                node_health.append(self.response)
 
+
+
+
+        if node_health:
+            for node in node_health:
+                print(node)
+
+
+    def get_status(self):
+        """
+        This method will responsible to fetch
+        the status for all activities for the
+        node.
+        """
+        health = HealthStatus(self.node).status()
+        # print(health)
+        time.sleep(2)
+        self.response.append(health)
+        return health
 
 if __name__ == "__main__":
     LCluster().main()

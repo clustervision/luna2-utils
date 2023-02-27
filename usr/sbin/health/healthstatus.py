@@ -224,16 +224,16 @@ class HealthStatus(object):
         if not self.check_ssh_port():
             self.answer['info'] = self.answer['history'][-1]
             return self.answer
-        # self.answer['category'] = category.DOWN
+        self.answer['category'] = category.DOWN
         if not self.check_ssh():
             self.answer['info'] = self.answer['history'][-1]
             return self.answer
         self.answer['status'] = 'AVAIL'
-        # self.answer['category'] = category.WARN
+        self.answer['category'] = category.WARN
         if not self.check_mounts():
             self.answer['info'] = self.answer['history'][-1]
             self.answer['status'] = 'NO_FS'
             return self.answer
         self.answer['status'] = 'OK'
-        # self.answer['category'] = category.GOOD
+        self.answer['category'] = category.GOOD
         return self.answer
