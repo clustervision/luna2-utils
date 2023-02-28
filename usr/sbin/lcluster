@@ -17,6 +17,8 @@ from configparser import RawConfigParser
 import subprocess as sp
 from threading import Timer
 import requests
+from prettytable import PrettyTable
+from termcolor import colored
 
 
 class LCluster(object):
@@ -30,7 +32,9 @@ class LCluster(object):
         Default variables should be here
         before calling the any method.
         """
+        self.table = PrettyTable()
         self.node = None
+        self.node_hostname = None
         self.statuses = {}
         self.monitor = 'monitoring.clustervision.com'
         self.server_hostname = 'mgm-sensu-01.taurusgroup.one'
@@ -38,12 +42,10 @@ class LCluster(object):
         self.server_port = 4567
         self.server_url = f'http://{self.server_ip}:{self.server_port}/'
 
-         # self.logger = Log.get_logger()
         self.username, self.password, self.daemon = '', '', ''
         ini_file = '/trinity/local/luna/config/luna.ini'
         file_check = os.path.isfile(ini_file)
         read_check = os.access(ini_file, os.R_OK)
-        # print(f'INI File => {ini_file} READ Check is {read_check}')
         if file_check and read_check:
             configparser = RawConfigParser()
             configparser.read(ini_file)
@@ -54,7 +56,6 @@ class LCluster(object):
             if configparser.has_option('API', 'ENDPOINT'):
                 # self.daemon = configparser.get('API', 'ENDPOINT')
                 self.daemon = '172.27.220.129:7050'
-            # print(f'INI File Username => {self.username}, Password {self.password} and Endpoint {self.daemon}')
         else:
             print(f'{ini_file} is not found on this machine.')
 
@@ -69,9 +70,7 @@ class LCluster(object):
         data['username'] = self.username
         data['password'] = self.password
         daemon_url = f'http://{self.daemon}/token'
-        # print(f'Token URL => {daemon_url}')
         call = requests.post(url = daemon_url, json=data, timeout=5)
-        # print(f'Response Content => {call.content}, and HTTP Code {call.status_code}')
         data = call.json()
         if 'token' in data:
             response = data['token']
@@ -83,25 +82,58 @@ class LCluster(object):
         Method to call the class for further
         operations.
         """
-        node_list, result = [], []
+        result = []
         get_node_list = self.get_data('config', 'node')
         if get_node_list:
+            sno = 1
             for node in get_node_list['config']['node']:
-                # hostname = get_node_list['config']['node'][node]['hostname']
-                hostname = get_node_list['config']['node'][node]['name']
-                node_list.append(hostname)
-            print(node_list)
-        if node_list:
-            for node in node_list:
+                rows = []
+                self.node_hostname = get_node_list['config']['node'][node]['hostname']
                 self.node = node
-                response = {}
-                response['Node'] = self.node
-                response['IPMI'] = self.node_ipmi()
-                response['Luna'] = self.node_status()
-                response['SLURM'] = self.slurm_state()
-                response['Sensu'] = self.sensu_state()
-                result.append(response)
-        print(result)
+                rows.append(self.get_colored(sno))
+                rows.append(self.get_colored(self.node))
+                rows.append(self.get_colored(self.node_ipmi()))
+                rows.append(self.get_colored(self.node_status()))
+                rows.append(self.get_colored(self.slurm_state()))
+                rows.append(self.get_colored(self.sensu_state()))
+                result.append(rows)
+                sno = sno + 1
+        if result:
+            self.show_table(result)
+        else:
+            colored('No Nodes are available.', 'red', attrs=['bold'])
+
+
+    def get_colored(self, text=None):
+        """
+        This method will fetch a records from
+        the Luna 2 Daemon Database
+        """
+        if text is True or text == 'PASS':
+            text = colored(text, 'green')
+        elif text is False or text == 'CRITICAL':
+            text = colored(text, 'red')
+        elif text == 'WARNING':
+            text = colored(text, 'yellow')
+        else:
+            text = colored(text, 'blue')
+        return text
+
+
+    def show_table(self, rows=None):
+        """
+        This method will fetch a records from
+        the Luna 2 Daemon Database
+        """
+        self.table.title = colored('<< Health & Status of Nodes >>', 'cyan', attrs=['bold'])
+        fields = ['S. No.', 'Node', 'IPMI', 'Luna', 'SLURM', 'Sensu']
+        field = []
+        for fieldn in fields:
+            field.append(colored(fieldn, 'yellow', attrs=['bold']))
+        self.table.field_names = field
+        self.table.add_rows(rows)
+        print(self.table)
+        return True
 
 
     def get_data(self, route=None, uri=None):
@@ -115,7 +147,6 @@ class LCluster(object):
         daemon_url = f'http://{self.daemon}/{route}'
         if uri:
             daemon_url = f'{daemon_url}/{uri}'
-        print(f'RAW URL => {daemon_url}')
         call = requests.get(url=daemon_url, headers=headers, timeout=5)
         if call:
             response = call.json()
@@ -131,9 +162,7 @@ class LCluster(object):
         response = False
         headers = {'x-access-tokens': self.get_token()}
         daemon_url = f'http://{self.daemon}/control/power/{self.node}/_status'
-        # print(f'RAW URL => {daemon_url}')
         call = requests.get(url=daemon_url, headers=headers, timeout=5)
-        # print(f'RAW URL => {call.status_code}')
         if call:
             data = call.json()
             response = data['control']['status']
@@ -162,12 +191,17 @@ class LCluster(object):
         It will fetch the records from Luna 2 Daemon
         via REST API's.
         """
-        response = False
-        self.node = 'crm.cv.taurusgroup.one'
-        sensu_url = f'{self.server_url}clients/{self.node}'
+        response = 'PASS'
+        self.node = 'f00f.taurusgroup.one'
+        sensu_url = f'{self.server_url}events/{self.node}'
         call = requests.get(url=sensu_url, timeout=5)
-        if call:
-            response = True
+        data = call.json()
+        if data:
+            status = data[0]['check']['status']
+            if status == 1:
+                response = "WARNING"
+            elif status == 2:
+                response = "CRITICAL"
         return response
 
 
@@ -192,10 +226,8 @@ class LCluster(object):
             if nodename not in self.statuses:
                 self.statuses[nodename] = set()
             self.statuses[nodename].add(status)
+            response = "/".join(self.statuses[self.node])
 
-            status = "/".join(self.statuses[self.node])
-
-            response = status
         return response
 
 
@@ -212,16 +244,16 @@ class LCluster(object):
             try:
                 timer.start()
                 stdout, stderr = proc.communicate()
-            except:
+            except Exception as exp:
                 print(f"Timeout executing {cmd}")
-                # log.debug("Timeout executing '{}'".format(cmd))
+                print(f"Timeout executing {exp}")
             finally:
                 timer.cancel()
 
             proc.wait()
             rc = proc.returncode
-        except Exception as e:
-            exception = e
+        except Exception as exp:
+            exception = exp
         return rc, stdout, stderr, exception
 
 
