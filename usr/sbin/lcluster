@@ -2,23 +2,21 @@
 # -*- coding: utf-8 -*-
 
 """
-lcluster Class Trinity Project
+lcluster Utility for Trinity Project
 """
 __author__      = "Sumit Sharma"
-__copyright__   = "Copyright 2022, Luna2 Project [CLI]"
+__copyright__   = "Copyright 2022, Luna2 Project [UTILITY]"
 __license__     = "GPL"
 __version__     = "2.0"
 __maintainer__  = "Sumit Sharma"
 __email__       = "sumit.sharma@clustervision.com"
 __status__      = "Development"
 
-
-from argparse import ArgumentParser
-from health.healthstatus import HealthStatus
-from health.sensu import Sensu
-from health.utils import Utils
-from threading import Thread
-import time
+import os
+from configparser import RawConfigParser
+import subprocess as sp
+from threading import Timer
+import requests
 
 
 class LCluster(object):
@@ -32,23 +30,52 @@ class LCluster(object):
         Default variables should be here
         before calling the any method.
         """
-        self.parser = None
-        self.args = None
         self.node = None
-        self.response = []
+        self.statuses = {}
+        self.monitor = 'monitoring.clustervision.com'
+        self.server_hostname = 'mgm-sensu-01.taurusgroup.one'
+        self.server_ip = '192.168.160.55'
+        self.server_port = 4567
+        self.server_url = f'http://{self.server_ip}:{self.server_port}/'
+
+         # self.logger = Log.get_logger()
+        self.username, self.password, self.daemon = '', '', ''
+        ini_file = '/trinity/local/luna/config/luna.ini'
+        file_check = os.path.isfile(ini_file)
+        read_check = os.access(ini_file, os.R_OK)
+        # print(f'INI File => {ini_file} READ Check is {read_check}')
+        if file_check and read_check:
+            configparser = RawConfigParser()
+            configparser.read(ini_file)
+            if configparser.has_option('API', 'USERNAME'):
+                self.username = configparser.get('API', 'USERNAME')
+            if configparser.has_option('API', 'PASSWORD'):
+                self.password = configparser.get('API', 'PASSWORD')
+            if configparser.has_option('API', 'ENDPOINT'):
+                # self.daemon = configparser.get('API', 'ENDPOINT')
+                self.daemon = '172.27.220.129:7050'
+            # print(f'INI File Username => {self.username}, Password {self.password} and Endpoint {self.daemon}')
+        else:
+            print(f'{ini_file} is not found on this machine.')
 
 
-    def main(self):
+    def get_token(self):
         """
-        Main method to fetch and provide the arguments
-        for each class.
+        This method will fetch a valid token
+        for further use.
         """
-        self.parser = ArgumentParser(prog='lcluster', description='Health Check Luna Cluster')
-        self.parser.add_argument('-d', '--detail', action='store_true', help='See the detailed view')
-        self.parser.add_argument('-v', '--verbose', action='store_true', help='See the Debug Information')
-        self.args = vars(self.parser.parse_args())
-        self.health_checkup()
-        return True
+        data = {}
+        response = False
+        data['username'] = self.username
+        data['password'] = self.password
+        daemon_url = f'http://{self.daemon}/token'
+        # print(f'Token URL => {daemon_url}')
+        call = requests.post(url = daemon_url, json=data, timeout=5)
+        # print(f'Response Content => {call.content}, and HTTP Code {call.status_code}')
+        data = call.json()
+        if 'token' in data:
+            response = data['token']
+        return response
 
 
     def health_checkup(self):
@@ -56,45 +83,147 @@ class LCluster(object):
         Method to call the class for further
         operations.
         """
-        Sensu()
-        node_list, node_health = [], []
-        get_node_list = Utils().get_data('config', 'node')
+        node_list, result = [], []
+        get_node_list = self.get_data('config', 'node')
         if get_node_list:
             for node in get_node_list['config']['node']:
-                hostname = get_node_list['config']['node'][node]['hostname']
+                # hostname = get_node_list['config']['node'][node]['hostname']
+                hostname = get_node_list['config']['node'][node]['name']
                 node_list.append(hostname)
             print(node_list)
         if node_list:
             for node in node_list:
                 self.node = node
-                # self.node = 'fedora'
-                health = Thread(target = self.get_status)
-                health.start()
-                health.join()
-                # thread_response = health.join()
-                # return_value = HealthStatus(self.node).status()
-                print(self.response)
-                node_health.append(self.response)
+                response = {}
+                response['Node'] = self.node
+                response['IPMI'] = self.node_ipmi()
+                response['Luna'] = self.node_status()
+                response['SLURM'] = self.slurm_state()
+                response['Sensu'] = self.sensu_state()
+                result.append(response)
+        print(result)
 
 
-
-
-        if node_health:
-            for node in node_health:
-                print(node)
-
-
-    def get_status(self):
+    def get_data(self, route=None, uri=None):
         """
-        This method will responsible to fetch
-        the status for all activities for the
-        node.
+        This method is based on REST API's GET method.
+        It will fetch the records from Luna 2 Daemon
+        via REST API's.
         """
-        health = HealthStatus(self.node).status()
-        # print(health)
-        time.sleep(2)
-        self.response.append(health)
-        return health
+        response = False
+        headers = {'x-access-tokens': self.get_token()}
+        daemon_url = f'http://{self.daemon}/{route}'
+        if uri:
+            daemon_url = f'{daemon_url}/{uri}'
+        print(f'RAW URL => {daemon_url}')
+        call = requests.get(url=daemon_url, headers=headers, timeout=5)
+        if call:
+            response = call.json()
+        return response
+
+
+    def node_ipmi(self):
+        """
+        This method is based on REST API's GET method.
+        It will fetch the records from Luna 2 Daemon
+        via REST API's.
+        """
+        response = False
+        headers = {'x-access-tokens': self.get_token()}
+        daemon_url = f'http://{self.daemon}/control/power/{self.node}/_status'
+        # print(f'RAW URL => {daemon_url}')
+        call = requests.get(url=daemon_url, headers=headers, timeout=5)
+        # print(f'RAW URL => {call.status_code}')
+        if call:
+            data = call.json()
+            response = data['control']['status']
+        return response
+
+
+    def node_status(self):
+        """
+        This method is based on REST API's GET method.
+        It will fetch the records from Luna 2 Daemon
+        via REST API's.
+        """
+        response = False
+        headers = {'x-access-tokens': self.get_token()}
+        daemon_url = f'http://{self.daemon}/monitor/status/{self.node}'
+        call = requests.get(url=daemon_url, headers=headers, timeout=5)
+        if call:
+            data = call.json()
+            response = data['monitor']['status'][self.node]['state']
+        return response
+
+
+    def sensu_state(self):
+        """
+        This method is based on REST API's GET method.
+        It will fetch the records from Luna 2 Daemon
+        via REST API's.
+        """
+        response = False
+        self.node = 'crm.cv.taurusgroup.one'
+        sensu_url = f'{self.server_url}clients/{self.node}'
+        call = requests.get(url=sensu_url, timeout=5)
+        if call:
+            response = True
+        return response
+
+
+    def slurm_state(self):
+        """
+        Returns stdout for
+        sinfo -N -o "%N %6T"
+        """
+        response = False
+        cmd = 'sinfo -N -o "%N %6T"'
+        rc, stdout, _, _ = self.run_cmd(cmd)
+
+        if rc:
+            return self.statuses
+
+        for line in stdout.split("\n"):
+            line = line.split()
+            if len(line) < 2:
+                continue
+            nodename = line[0]
+            status = line[1]
+            if nodename not in self.statuses:
+                self.statuses[nodename] = set()
+            self.statuses[nodename].add(status)
+
+            status = "/".join(self.statuses[self.node])
+
+            response = status
+        return response
+
+
+    def run_cmd(self, cmd=None, timeout=30):
+        """
+        Returns 'rc', 'stdout', 'stderr', 'exception'
+        Where 'exception' is a content of Python exception if any
+        """
+        rc = 255
+        stdout, stderr, exception = "", "", ""
+        try:
+            proc = sp.Popen(cmd, shell=True, stdout=sp.PIPE, stderr=sp.PIPE)
+            timer = Timer(timeout, lambda p: p.kill(), [proc])
+            try:
+                timer.start()
+                stdout, stderr = proc.communicate()
+            except:
+                print(f"Timeout executing {cmd}")
+                # log.debug("Timeout executing '{}'".format(cmd))
+            finally:
+                timer.cancel()
+
+            proc.wait()
+            rc = proc.returncode
+        except Exception as e:
+            exception = e
+        return rc, stdout, stderr, exception
+
 
 if __name__ == "__main__":
-    LCluster().main()
+    LCluster().health_checkup()
