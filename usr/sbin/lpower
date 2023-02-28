@@ -60,7 +60,7 @@ def main(argv):
 
 def callHelp():
     print ("""
-usage: lpower [-h] [--groups GROUPS] [--interface INTERFACE]
+usage: lpower [-h] [--interface INTERFACE]
               [hosts] {status,on,off,reset,cycle,identify,noidentify}
 
 BMC power management.
@@ -72,8 +72,6 @@ positional arguments:
 
 optional arguments:
   -h, --help            show this help message and exit
-  --groups GROUPS, -g GROUPS
-                        Group list
   --interface INTERFACE, -i INTERFACE
                         Interface to use instead of "BMC"
     """)
@@ -158,7 +156,7 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
         # single node query we do with GET
         if (result and nodes == result.group(1)):
             try:
-                r = requests.get('http://'+CONF["ENDPOINT"]+'/control/power/node001/'+action,headers=headers)
+                r = requests.get(f'http://{CONF["ENDPOINT"]}/control/power/{nodes}/{action}',headers=headers)
                 status_code=str(r.status_code)
                 if (r.text):
                     DATA=json.loads(r.text)
@@ -184,7 +182,7 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
         else:
             try:
                 body = {'control': { 'power': { action: { 'hostlist': nodes } } } }
-                r = requests.post('http://'+CONF["ENDPOINT"]+'/control/power', json=body, headers=headers)
+                r = requests.post(f'http://{CONF["ENDPOINT"]}/control/power', json=body, headers=headers)
                 status_code=str(r.status_code)
                 if (status_code in RET):
                     print(nodes+": failed: "+RET[status_code])
@@ -194,7 +192,7 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
                     # ------------- loop to keep polling for updates. -----------------------------------------------
                     while r.status_code == 200:
                         sleep(2)
-                        r = requests.get('http://'+CONF["ENDPOINT"]+'/control/status/'+str(request_id),headers=headers)
+                        r = requests.get(f'http://{CONF["ENDPOINT"]}/control/status/{request_id}',headers=headers)
                         status_code=str(r.status_code)
                         if (r.status_code!=200):
                             return
