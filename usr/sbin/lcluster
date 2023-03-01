@@ -101,7 +101,7 @@ class LCluster(object):
         if result:
             self.show_table(result)
         else:
-            colored('No Nodes are available.', 'red', attrs=['bold'])
+            print(colored('No Nodes are available.', 'red', attrs=['bold']))
 
 
     def get_colored(self, text=None):
@@ -212,10 +212,11 @@ class LCluster(object):
         """
         response = False
         cmd = 'sinfo -N -o "%N %6T"'
-        rc, stdout, _, _ = self.run_cmd(cmd)
+        return_code, stdout, _, _ = self.run_cmd(cmd)
 
-        if rc:
-            return self.statuses
+        if return_code:
+            return False
+            # return self.statuses
 
         for line in stdout.split("\n"):
             line = line.split()
@@ -233,10 +234,10 @@ class LCluster(object):
 
     def run_cmd(self, cmd=None, timeout=30):
         """
-        Returns 'rc', 'stdout', 'stderr', 'exception'
+        Returns 'return_code', 'stdout', 'stderr', 'exception'
         Where 'exception' is a content of Python exception if any
         """
-        rc = 255
+        return_code = 255
         stdout, stderr, exception = "", "", ""
         try:
             proc = sp.Popen(cmd, shell=True, stdout=sp.PIPE, stderr=sp.PIPE)
@@ -244,17 +245,16 @@ class LCluster(object):
             try:
                 timer.start()
                 stdout, stderr = proc.communicate()
-            except Exception as exp:
-                print(f"Timeout executing {cmd}")
-                print(f"Timeout executing {exp}")
+            except sp.TimeoutExpired as exp:
+                print(f"Subprocess Timeout executing {exp}")
             finally:
                 timer.cancel()
-
             proc.wait()
-            rc = proc.returncode
-        except Exception as exp:
+            return_code = proc.returncode
+        except sp.SubprocessError as exp:
+            print(f"Subprocess Error executing {cmd} Exception is {exp}")
             exception = exp
-        return rc, stdout, stderr, exception
+        return return_code, stdout, stderr, exception
 
 
 if __name__ == "__main__":
