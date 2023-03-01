@@ -55,7 +55,8 @@ class LCluster(object):
                 self.password = configparser.get('API', 'PASSWORD')
             if configparser.has_option('API', 'ENDPOINT'):
                 # self.daemon = configparser.get('API', 'ENDPOINT')
-                self.daemon = '172.27.220.129:7050'
+                # self.daemon = '172.27.220.129:7050'
+                self.daemon = '192.168.164.90:7050'
         else:
             print(f'{ini_file} is not found on this machine.')
 
@@ -162,7 +163,7 @@ class LCluster(object):
         response = False
         headers = {'x-access-tokens': self.get_token()}
         daemon_url = f'http://{self.daemon}/control/power/{self.node}/_status'
-        call = requests.get(url=daemon_url, headers=headers, timeout=5)
+        call = requests.get(url=daemon_url, headers=headers, timeout=30)
         if call:
             data = call.json()
             response = data['control']['status']
@@ -191,11 +192,19 @@ class LCluster(object):
         It will fetch the records from Luna 2 Daemon
         via REST API's.
         """
-        response = 'PASS'
+        response = 'FAIL'
         self.node = 'f00f.taurusgroup.one'
         sensu_url = f'{self.server_url}events/{self.node}'
-        call = requests.get(url=sensu_url, timeout=5)
-        data = call.json()
+        try:
+            call = requests.get(url=sensu_url, timeout=5)
+            data = call.json()
+            response = 'PASS'
+        except requests.exceptions.Timeout:
+            data = None
+        except requests.exceptions.TooManyRedirects:
+            data = None
+        except requests.exceptions.RequestException:
+            data = None
         if data:
             status = data[0]['check']['status']
             if status == 1:
@@ -211,14 +220,17 @@ class LCluster(object):
         sinfo -N -o "%N %6T"
         """
         response = False
-        cmd = 'sinfo -N -o "%N %6T"'
+        cmd = f'sinfo -N -o "%N %6T" | grep {self.node} | cut -d " " -f2'
         return_code, stdout, _, _ = self.run_cmd(cmd)
 
-        if return_code:
-            return False
-            # return self.statuses
-
-        for line in stdout.split("\n"):
+        if not return_code:
+            stdout = str(stdout).replace("b", '')
+            stdout = stdout.replace("'", '')
+            stdout = stdout.replace("\\n", '')
+            if stdout:
+                response = stdout
+        return response
+        for line in str(stdout).split("\n"):
             line = line.split()
             if len(line) < 2:
                 continue
@@ -227,7 +239,7 @@ class LCluster(object):
             if nodename not in self.statuses:
                 self.statuses[nodename] = set()
             self.statuses[nodename].add(status)
-            response = "/".join(self.statuses[self.node])
+            # response = "/".join(self.statuses[self.node])
 
         return response
 
