@@ -13,6 +13,7 @@ __email__       = "sumit.sharma@clustervision.com"
 __status__      = "Development"
 
 import os
+import sys
 from configparser import RawConfigParser
 import subprocess as sp
 from threading import Timer
@@ -34,12 +35,11 @@ class LCluster():
         before calling the any method.
         """
         self.table = PrettyTable()
+        self.token = None
         self.node = None
         self.node_hostname = None
         self.sensu_data = None
         self.statuses = {}
-        self.server_url = 'http://192.168.160.55:4567/events'
-
         self.username, self.password, self.daemon = '', '', ''
         ini_file = '/trinity/local/luna/config/luna.ini'
         file_check = os.path.isfile(ini_file)
@@ -52,25 +52,41 @@ class LCluster():
             if configparser.has_option('API', 'PASSWORD'):
                 self.password = configparser.get('API', 'PASSWORD')
             if configparser.has_option('API', 'ENDPOINT'):
-                self.daemon = configparser.get('API', 'ENDPOINT')
+                self.daemon = f"http://{configparser.get('API', 'ENDPOINT')}"
         else:
-            print(f'{ini_file} is not found on this machine.')
+            self.exit_lcluster(f'{ini_file} is not found on this machine.')
+        if self.username and self.password and self.daemon:
+            self.token = self.get_token()
+
+
+    def exit_lcluster(self, message=None):
+        """
+        This method will exit from the script with the message
+        """
+        error = colored(f'ERROR :: {message}', 'red', attrs=['bold'])
+        sys.exit(error)
 
 
     def get_token(self):
         """
-        This method will fetch a valid token
-        for further use.
+        This method will fetch a valid token for further use.
         """
-        data = {}
         response = False
-        data['username'] = self.username
-        data['password'] = self.password
-        daemon_url = f'http://{self.daemon}/token'
-        call = requests.post(url = daemon_url, json=data, timeout=5)
-        data = call.json()
-        if 'token' in data:
-            response = data['token']
+        token_url = f'{self.daemon}/token'
+        data = {'username': self.username, 'password': self.password}
+        try:
+            call = requests.post(url=token_url, json=data, timeout=5)
+            data = call.json()
+            if 'token' in data:
+                response = data['token']
+            else:
+                self.exit_lcluster('Not able to retrive token.')
+        except requests.exceptions.Timeout:
+            self.exit_lcluster('Timeout while requesting for token.')
+        except requests.exceptions.TooManyRedirects:
+            self.exit_lcluster('Too Many Redirects while requesting for token.')
+        except requests.exceptions.RequestException:
+            self.exit_lcluster('Request Exception while requesting for token.')
         return response
 
 
@@ -80,8 +96,9 @@ class LCluster():
         operations.
         """
         result = []
-        get_node_list = self.get_data('config', 'node')
-        self.sensu_data = self.sensu_events()
+        node_url = f'{self.daemon}/config/node'
+        get_node_list = self.get_data(node_url, True)
+        self.sensu_data = self.get_data(__sensu_events__)
         if get_node_list:
             sno = 1
             for node in get_node_list['config']['node']:
@@ -99,7 +116,7 @@ class LCluster():
         if result:
             self.show_table(result)
         else:
-            print(colored('No Nodes are available.', 'red', attrs=['bold']))
+            self.exit_lcluster('No Nodes are available.')
 
 
     def get_colored(self, text=None):
@@ -134,63 +151,17 @@ class LCluster():
         return True
 
 
-    def get_data(self, route=None, uri=None):
+    def get_data(self, url=None, daemon=False):
         """
-        This method is based on REST API's GET method.
-        It will fetch the records from Luna 2 Daemon
-        via REST API's.
-        """
-        response = False
-        headers = {'x-access-tokens': self.get_token()}
-        daemon_url = f'http://{self.daemon}/{route}'
-        if uri:
-            daemon_url = f'{daemon_url}/{uri}'
-        call = requests.get(url=daemon_url, headers=headers, timeout=10)
-        if call:
-            response = call.json()
-        return response
-
-
-    def node_ipmi(self):
-        """
-        This method is based on REST API's GET method.
-        It will fetch the records from Luna 2 Daemon
-        via REST API's.
-        """
-        response = False
-        headers = {'x-access-tokens': self.get_token()}
-        daemon_url = f'http://{self.daemon}/control/power/{self.node}/_status'
-        call = requests.get(url=daemon_url, headers=headers, timeout=30)
-        if call:
-            data = call.json()
-            response = data['control']['status']
-        return response
-
-
-    def node_status(self):
-        """
-        This method is based on REST API's GET method.
-        It will fetch the records from Luna 2 Daemon
-        via REST API's.
-        """
-        response = False
-        headers = {'x-access-tokens': self.get_token()}
-        daemon_url = f'http://{self.daemon}/monitor/status/{self.node}'
-        call = requests.get(url=daemon_url, headers=headers, timeout=10)
-        if call:
-            data = call.json()
-            response = data['monitor']['status'][self.node]['state']
-        return response
-
-
-    def sensu_events(self):
-        """
-        This method is based on REST API's GET method.
-        It will fetch the records from Luna 2 Daemon
-        via REST API's.
+        This method will make a get request and fetch the data
+        accordingly.
         """
         try:
-            call = requests.get(url=__sensu_events__ , timeout=5)
+            if daemon:
+                headers = {'x-access-tokens': self.token}
+                call = requests.get(url=url, headers=headers, timeout=5)
+            else:
+                call = requests.get(url=url , timeout=5)
             response = call.json()
         except requests.exceptions.Timeout:
             response = None
@@ -201,11 +172,34 @@ class LCluster():
         return response
 
 
+    def node_ipmi(self):
+        """
+        This method return the IPMI status for a node.
+        """
+        response = False
+        ipmi_url = f'{self.daemon}/control/power/{self.node}/_status'
+        data = self.get_data(ipmi_url, True)
+        if data:
+            response = data['control']['status']
+        return response
+
+
+    def node_status(self):
+        """
+        This method return the status of a node.
+        """
+        response = False
+        monitor_url = f'{self.daemon}/monitor/status/{self.node}'
+        data = self.get_data(monitor_url, True)
+        if data:
+            response = data['monitor']['status'][self.node]['state']
+        return response
+
+
     def check_sensu(self):
         """
-        This method is based on REST API's GET method.
-        It will fetch the records from Luna 2 Daemon
-        via REST API's.
+        This method will filter the correct status for the Sensu
+        for a node.
         """
         if self.sensu_data:
             for data in self.sensu_data:
@@ -225,7 +219,8 @@ class LCluster():
 
     def slurm_state(self):
         """
-        Returns stdout for sinfo -N -o "%N %6T"
+        This method findout the slurm state for a node
+        via sinfo command with grep and cut
         """
         response = False
         cmd = f'sinfo -N -o "%N %6T" | grep {self.node} | cut -d " " -f2'
