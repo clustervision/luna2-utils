@@ -164,10 +164,13 @@ class LCluster():
                 call = requests.get(url=url , timeout=5)
             response = call.json()
         except requests.exceptions.Timeout:
+            print(f'Timeout on {url}.')
             response = None
         except requests.exceptions.TooManyRedirects:
+            print(f'Too Many Redirects on {url}.')
             response = None
         except requests.exceptions.RequestException:
+            print(f'Request Exception on {url}.')
             response = None
         return response
 
