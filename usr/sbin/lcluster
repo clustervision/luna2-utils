@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+lcluster Utility for Trinity Project
+"""
+__author__      = "Sumit Sharma"
+__copyright__   = "Copyright 2022, Luna2 Project [UTILITY]"
+__license__     = "GPL"
+__version__     = "2.0"
+__maintainer__  = "Sumit Sharma"
+__email__       = "sumit.sharma@clustervision.com"
+__status__      = "Development"
+
+import os
+import sys
+from configparser import RawConfigParser
+import subprocess as sp
+from threading import Timer
+import requests
+from prettytable import PrettyTable
+from termcolor import colored
+
+__sensu_events__ = 'http://192.168.160.55:4567/events'
+
+class LCluster():
+    """
+    LCluster Class responsible to all Monitoring
+    activities.
+    """
+
+    def __init__(self):
+        """
+        Default variables should be here
+        before calling the any method.
+        """
+        self.table = PrettyTable()
+        self.token = None
+        self.node = None
+        self.node_hostname = None
+        self.sensu_data = None
+        self.statuses = {}
+        self.username, self.password, self.daemon = '', '', ''
+        ini_file = '/trinity/local/luna/config/luna.ini'
+        file_check = os.path.isfile(ini_file)
+        read_check = os.access(ini_file, os.R_OK)
+        if file_check and read_check:
+            configparser = RawConfigParser()
+            configparser.read(ini_file)
+            if configparser.has_option('API', 'USERNAME'):
+                self.username = configparser.get('API', 'USERNAME')
+            if configparser.has_option('API', 'PASSWORD'):
+                self.password = configparser.get('API', 'PASSWORD')
+            if configparser.has_option('API', 'ENDPOINT'):
+                self.daemon = f"http://{configparser.get('API', 'ENDPOINT')}"
+        else:
+            self.exit_lcluster(f'{ini_file} is not found on this machine.')
+        if self.username and self.password and self.daemon:
+            self.token = self.get_token()
+
+
+    def exit_lcluster(self, message=None):
+        """
+        This method will exit from the script with the message
+        """
+        error = colored(f'ERROR :: {message}', 'red', attrs=['bold'])
+        sys.exit(error)
+
+
+    def get_token(self):
+        """
+        This method will fetch a valid token for further use.
+        """
+        response = False
+        token_url = f'{self.daemon}/token'
+        data = {'username': self.username, 'password': self.password}
+        try:
+            call = requests.post(url=token_url, json=data, timeout=5)
+            data = call.json()
+            if 'token' in data:
+                response = data['token']
+            else:
+                self.exit_lcluster('Not able to retrive token.')
+        except requests.exceptions.Timeout:
+            self.exit_lcluster('Timeout while requesting for token.')
+        except requests.exceptions.TooManyRedirects:
+            self.exit_lcluster('Too Many Redirects while requesting for token.')
+        except requests.exceptions.RequestException:
+            self.exit_lcluster('Request Exception while requesting for token.')
+        return response
+
+
+    def health_checkup(self):
+        """
+        Method to call the class for further
+        operations.
+        """
+        result = []
+        node_url = f'{self.daemon}/config/node'
+        get_node_list = self.get_data(node_url, True)
+        self.sensu_data = self.get_data(__sensu_events__)
+        if get_node_list:
+            sno = 1
+            for node in get_node_list['config']['node']:
+                rows = []
+                self.node_hostname = get_node_list['config']['node'][node]['hostname']
+                self.node = node
+                rows.append(self.get_colored(sno))
+                rows.append(self.get_colored(self.node))
+                rows.append(self.get_colored(self.node_ipmi()))
+                rows.append(self.get_colored(self.node_status()))
+                rows.append(self.get_colored(self.slurm_state()))
+                rows.append(self.get_colored(self.check_sensu()))
+                result.append(rows)
+                sno = sno + 1
+        if result:
+            self.show_table(result)
+        else:
+            self.exit_lcluster('No Nodes are available.')
+
+
+    def get_colored(self, text=None):
+        """
+        This method will fetch a records from
+        the Luna 2 Daemon Database
+        """
+        if text is True or text == 'PASS':
+            text = colored(text, 'green')
+        elif text is False or text in ['CRITICAL', 'Sensu Down']:
+            text = colored(text, 'red')
+        elif text == 'WARNING':
+            text = colored(text, 'yellow')
+        else:
+            text = colored(text, 'blue')
+        return text
+
+
+    def show_table(self, rows=None):
+        """
+        This method will fetch a records from
+        the Luna 2 Daemon Database
+        """
+        self.table.title = colored('<< Health & Status of Nodes >>', 'cyan', attrs=['bold'])
+        fields = ['S. No.', 'Node', 'IPMI', 'Luna', 'SLURM', 'Sensu']
+        field = []
+        for fieldn in fields:
+            field.append(colored(fieldn, 'yellow', attrs=['bold']))
+        self.table.field_names = field
+        self.table.add_rows(rows)
+        print(self.table)
+        return True
+
+
+    def get_data(self, url=None, daemon=False):
+        """
+        This method will make a get request and fetch the data
+        accordingly.
+        """
+        try:
+            if daemon:
+                headers = {'x-access-tokens': self.token}
+                call = requests.get(url=url, headers=headers, timeout=5)
+            else:
+                call = requests.get(url=url , timeout=5)
+            response = call.json()
+        except requests.exceptions.Timeout:
+            print(f'Timeout on {url}.')
+            response = None
+        except requests.exceptions.TooManyRedirects:
+            print(f'Too Many Redirects on {url}.')
+            response = None
+        except requests.exceptions.RequestException:
+            print(f'Request Exception on {url}.')
+            response = None
+        return response
+
+
+    def node_ipmi(self):
+        """
+        This method return the IPMI status for a node.
+        """
+        response = False
+        ipmi_url = f'{self.daemon}/control/power/{self.node}/_status'
+        data = self.get_data(ipmi_url, True)
+        if data:
+            response = data['control']['status']
+        return response
+
+
+    def node_status(self):
+        """
+        This method return the status of a node.
+        """
+        response = False
+        monitor_url = f'{self.daemon}/monitor/status/{self.node}'
+        data = self.get_data(monitor_url, True)
+        if data:
+            response = data['monitor']['status'][self.node]['state']
+        return response
+
+
+    def check_sensu(self):
+        """
+        This method will filter the correct status for the Sensu
+        for a node.
+        """
+        if self.sensu_data:
+            for data in self.sensu_data:
+                if self.node_hostname in data['client']['name']:
+                    if data['check']['status'] == 1:
+                        response = "WARNING"
+                    elif data['check']['status'] == 2:
+                        response = "CRITICAL"
+                    else:
+                        response = "UNKNOWN"
+                else:
+                    response = "PASS"
+        else:
+            response = "Sensu Down"
+        return response
+
+
+    def slurm_state(self):
+        """
+        This method findout the slurm state for a node
+        via sinfo command with grep and cut
+        """
+        response = False
+        cmd = f'sinfo -N -o "%N %6T" | grep {self.node} | cut -d " " -f2'
+        return_code, stdout, _, _ = self.run_cmd(cmd)
+
+        if not return_code:
+            stdout = str(stdout).replace("b", '')
+            stdout = stdout.replace("'", '')
+            stdout = stdout.replace("\\n", '')
+            if stdout:
+                response = stdout
+        return response
+
+
+    def run_cmd(self, cmd=None, timeout=30):
+        """
+        Returns 'return_code', 'stdout', 'stderr', 'exception'
+        Where 'exception' is a content of Python exception if any
+        """
+        return_code = 255
+        stdout, stderr, exception = "", "", ""
+        try:
+            proc = sp.Popen(cmd, shell=True, stdout=sp.PIPE, stderr=sp.PIPE)
+            timer = Timer(timeout, lambda p: p.kill(), [proc])
+            try:
+                timer.start()
+                stdout, stderr = proc.communicate()
+            except sp.TimeoutExpired as exp:
+                print(f"Subprocess Timeout executing {exp}")
+            finally:
+                timer.cancel()
+            proc.wait()
+            return_code = proc.returncode
+        except sp.SubprocessError as exp:
+            print(f"Subprocess Error executing {cmd} Exception is {exp}")
+            exception = exp
+        return return_code, stdout, stderr, exception
+
+
+if __name__ == "__main__":
+    LCluster().health_checkup()
