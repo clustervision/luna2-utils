@@ -39,6 +39,7 @@ class LCluster():
         self.node = None
         self.node_hostname = None
         self.sensu_data = None
+        self.sensu_url = None
         self.statuses = {}
         self.username, self.password, self.daemon = '', '', ''
         ini_file = '/trinity/local/luna/config/luna.ini'
@@ -53,6 +54,7 @@ class LCluster():
                 self.password = configparser.get('API', 'PASSWORD')
             if configparser.has_option('API', 'ENDPOINT'):
                 self.daemon = f"http://{configparser.get('API', 'ENDPOINT')}"
+                self.sensu_url = f"http://{configparser.get('API', 'ENDPOINT')}/events".replace('7050', '3001')
         else:
             self.exit_lcluster(f'{ini_file} is not found on this machine.')
         if self.username and self.password and self.daemon:
@@ -98,7 +100,7 @@ class LCluster():
         result = []
         node_url = f'{self.daemon}/config/node'
         get_node_list = self.get_data(node_url, True)
-        self.sensu_data = self.get_data(__sensu_events__)
+        self.sensu_data = self.get_data(self.sensu_url)
         if get_node_list:
             sno = 1
             for node in get_node_list['config']['node']:
