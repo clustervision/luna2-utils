@@ -21,8 +21,6 @@ import requests
 from prettytable import PrettyTable
 from termcolor import colored
 
-__sensu_events__ = 'http://192.168.160.55:4567/events'
-
 class LCluster():
     """
     LCluster Class responsible to all Monitoring
@@ -54,7 +52,9 @@ class LCluster():
                 self.password = configparser.get('API', 'PASSWORD')
             if configparser.has_option('API', 'ENDPOINT'):
                 self.daemon = f"http://{configparser.get('API', 'ENDPOINT')}"
-                self.sensu_url = f"http://{configparser.get('API', 'ENDPOINT')}/events".replace('7050', '3001')
+                if ':' in configparser.get('API', 'ENDPOINT'):
+                    daemon = configparser.get('API', 'ENDPOINT').split(':')
+                    self.sensu_url = f"http://{daemon[0]}:3001/events"
         else:
             self.exit_lcluster(f'{ini_file} is not found on this machine.')
         if self.username and self.password and self.daemon:
