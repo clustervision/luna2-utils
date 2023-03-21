@@ -101,6 +101,7 @@ class LCluster():
         node_url = f'{self.daemon}/config/node'
         get_node_list = self.get_data(node_url, True)
         self.sensu_data = self.get_data(self.sensu_url)
+        slurm = self.choose_slurm()
         if get_node_list:
             sno = 1
             for node in get_node_list['config']['node']:
@@ -111,7 +112,7 @@ class LCluster():
                 rows.append(self.get_colored(self.node))
                 rows.append(self.get_colored(self.node_ipmi()))
                 rows.append(self.get_colored(self.node_status()))
-                rows.append(self.get_colored(self.slurm_state()))
+                rows.append(self.get_colored(self.call_slurm(slurm)))
                 rows.append(self.get_colored(self.check_sensu()))
                 result.append(rows)
                 sno = sno + 1
@@ -222,7 +223,41 @@ class LCluster():
         return response
 
 
-    def slurm_state(self):
+    def choose_slurm(self):
+        """
+        This method findout slurm version and decide, if use
+        slurm cmd or api
+        """
+        response = 'cmd'
+        cmd = '/usr/sbin/slurmd -V | cut -d " " -f2'
+        return_code, stdout, stderr, exception= self.run_cmd(cmd)
+ 
+        if not return_code:
+            stdout = str(stdout).replace("b", '')
+            stdout = stdout.replace("'", '')
+            stdout = stdout.replace("\\n", '')
+            stdout = stdout.replace(".", '')
+            stdout = stdout[:4]
+            if int(stdout) >= 2022:
+                response = 'api'
+        return response
+
+
+    def call_slurm(self, state=None):
+        """
+        This method will call the slurm cmd or api method
+        depends on the state.
+        """
+        if 'api' in state:
+            response = self.slurm_api_state()
+        elif 'cmd' in state:
+            response = self.slurm_cmd_state()
+        else:
+            response = False
+        return response
+
+
+    def slurm_cmd_state(self):
         """
         This method findout the slurm state for a node
         via sinfo command with grep and cut
@@ -237,6 +272,21 @@ class LCluster():
             stdout = stdout.replace("\\n", '')
             if stdout:
                 response = stdout
+        return response
+
+
+    def slurm_api_state(self):
+        """
+        This method findout the slurm state for a node
+        via sinfo command with grep and cut
+        """
+        response = False
+        api = f'/slurm/v0.0.38/node/{self.node}'
+        ## TODO
+        ## Firgure out Actual Slurm API URL, make URL, header and payloads.
+        ## Call API, retrive and iterate data, and revert
+        if response is False:
+            response = self.slurm_cmd_state()
         return response
 
 
