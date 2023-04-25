@@ -82,7 +82,7 @@ class LCluster():
             if 'token' in data:
                 response = data['token']
             else:
-                self.exit_lcluster('Not able to retrive token.')
+                self.exit_lcluster('Not able to retrieve token.')
         except requests.exceptions.Timeout:
             self.exit_lcluster('Timeout while requesting for token.')
         except requests.exceptions.TooManyRedirects:
@@ -146,8 +146,8 @@ class LCluster():
         self.table.title = colored('<< Health & Status of Nodes >>', 'cyan', attrs=['bold'])
         fields = ['S. No.', 'Node', 'IPMI', 'Luna', 'SLURM', 'Sensu']
         field = []
-        for fieldn in fields:
-            field.append(colored(fieldn, 'yellow', attrs=['bold']))
+        for each in fields:
+            field.append(colored(each, 'yellow', attrs=['bold']))
         self.table.field_names = field
         self.table.add_rows(rows)
         print(self.table)
@@ -225,14 +225,14 @@ class LCluster():
 
     def choose_slurm(self):
         """
-        This method findout slurm version and decide, if use
+        This method find out slurm version and decide, if use
         slurm cmd or api
         """
         response = 'cmd'
         cmd = '/usr/sbin/slurmd -V | cut -d " " -f2'
         return_code, stdout, stderr, exception= self.run_cmd(cmd)
- 
-        if not return_code:
+
+        if not return_code and not stderr and not exception:
             stdout = str(stdout).replace("b", '')
             stdout = stdout.replace("'", '')
             stdout = stdout.replace("\\n", '')
@@ -259,7 +259,7 @@ class LCluster():
 
     def slurm_cmd_state(self):
         """
-        This method findout the slurm state for a node
+        This method   the slurm state for a node
         via sinfo command with grep and cut
         """
         response = False
@@ -277,14 +277,15 @@ class LCluster():
 
     def slurm_api_state(self):
         """
-        This method findout the slurm state for a node
+        This method find out the slurm state for a node
         via sinfo command with grep and cut
         """
         response = False
         api = f'/slurm/v0.0.38/node/{self.node}'
+        print(api)
         ## TODO
-        ## Firgure out Actual Slurm API URL, make URL, header and payloads.
-        ## Call API, retrive and iterate data, and revert
+        ## Figure out Actual Slurm API URL, make URL, header and payloads.
+        ## Call API, retrieve and iterate data, and revert
         if response is False:
             response = self.slurm_cmd_state()
         return response
