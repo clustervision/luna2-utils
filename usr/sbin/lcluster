@@ -14,81 +14,125 @@ __status__      = "Development"
 
 import os
 import sys
+from time import sleep
 from configparser import RawConfigParser
 import subprocess as sp
 from threading import Timer
+from hostlist import collect_hostlist
 import requests
+import jwt
 from prettytable import PrettyTable
 from termcolor import colored
 
+TOKEN_FILE = '/tmp/token.txt'
+INI_FILE = '/trinity/local/luna/config/luna.ini'
+
+
 class LCluster():
     """
-    LCluster Class responsible to all Monitoring
-    activities.
+    LCluster Class responsible to all Monitoring activities.
     """
 
     def __init__(self):
         """
-        Default variables should be here
-        before calling the any method.
+        Default variables should be here before calling the any method.
         """
+        error = []
+        self.username, self.password, self.daemon, self.secret_key = None, None, None, None
         self.table = PrettyTable()
-        self.token = None
-        self.node = None
-        self.node_hostname = None
-        self.sensu_data = None
-        self.sensu_url = None
-        self.statuses = {}
-        self.username, self.password, self.daemon = '', '', ''
-        ini_file = '/trinity/local/luna/config/luna.ini'
-        file_check = os.path.isfile(ini_file)
-        read_check = os.access(ini_file, os.R_OK)
+        file_check = os.path.isfile(INI_FILE)
+        read_check = os.access(INI_FILE, os.R_OK)
         if file_check and read_check:
             configparser = RawConfigParser()
-            configparser.read(ini_file)
-            if configparser.has_option('API', 'USERNAME'):
-                self.username = configparser.get('API', 'USERNAME')
-            if configparser.has_option('API', 'PASSWORD'):
-                self.password = configparser.get('API', 'PASSWORD')
-            if configparser.has_option('API', 'ENDPOINT'):
-                self.daemon = f"http://{configparser.get('API', 'ENDPOINT')}"
-                if ':' in configparser.get('API', 'ENDPOINT'):
-                    daemon = configparser.get('API', 'ENDPOINT').split(':')
-                    self.sensu_url = f"http://{daemon[0]}:3001/events"
+            configparser.read(INI_FILE)
+            if configparser.has_section('API'):
+                self.username, error = self.get_option(configparser, error, 'API', 'USERNAME')
+                self.password, error = self.get_option(configparser, error, 'API', 'PASSWORD')
+                self.secret_key, error = self.get_option(configparser, error, 'API', 'SECRET_KEY')
+                self.daemon, error = self.get_option(configparser, error, 'API', 'ENDPOINT')
+                if ':' in self.daemon:
+                    sensu_url = self.daemon.split(':')
+                    self.sensu_url = f"http://{sensu_url[0]}:3001/events"
+                self.daemon = f'http://{self.daemon}'
+            else:
+                error.append(f'API section is not found in {INI_FILE}.')
         else:
-            self.exit_lcluster(f'{ini_file} is not found on this machine.')
-        if self.username and self.password and self.daemon:
-            self.token = self.get_token()
+            error.append(f'{INI_FILE} is not found on this machine.')
+        if error:
+            sys.stderr.write('You need to fix following errors...\n')
+            num = 1
+            for error in error:
+                sys.stderr.write(f'{num}. {error}\n')
+            sys.exit(1)
+
+
+    def get_option(self, parser=None, error=None, section=None, option=None):
+        """
+        This method will retrieve the value from the INI
+        """
+        response = False
+        if parser.has_option(section, option):
+            response = parser.get(section, option)
+        else:
+            error.append(f'{option} is not found in {section} section in {INI_FILE}.')
+        return response, error
 
 
     def exit_lcluster(self, message=None):
         """
         This method will exit from the script with the message
         """
-        error = colored(f'ERROR :: {message}', 'red', attrs=['bold'])
-        sys.exit(error)
+        sys.stderr.write(colored(f'ERROR :: {message}\n', 'red', attrs=['bold']))
+        sys.exit(1)
+
+
+    def token(self):
+        """
+        This method will fetch a valid token for further use.
+        """
+        data = {'username': self.username, 'password': self.password}
+        daemon_url = f'{self.daemon}/token'
+        try:
+            call = requests.post(url=daemon_url, json=data, timeout=5)
+            if call.content:
+                data = call.json()
+                if 'token' in data:
+                    response = data['token']
+                    with open(TOKEN_FILE, 'w', encoding='utf-8') as file_data:
+                        file_data.write(response)
+                elif 'message' in data:
+                    self.exit_lcluster(f'ERROR :: {data["token"]}.')
+            else:
+                error = f'ERROR :: Received Nothing {self.daemon}.'
+                error = f'{error}ERROR :: HTTP Code {call.status_code}.'
+                self.exit_lcluster(error)
+        except requests.exceptions.ConnectionError:
+            self.exit_lcluster(f'ERROR :: Unable to Connect => {self.daemon}.')
+        except requests.exceptions.JSONDecodeError:
+            self.exit_lcluster(f'ERROR :: Response is not JSON {call.content}.')
+        return response
 
 
     def get_token(self):
         """
-        This method will fetch a valid token for further use.
+        This method will fetch a valid token
+        for further use.
         """
         response = False
-        token_url = f'{self.daemon}/token'
-        data = {'username': self.username, 'password': self.password}
-        try:
-            call = requests.post(url=token_url, json=data, timeout=5)
-            data = call.json()
-            if 'token' in data:
-                response = data['token']
-            else:
-                self.exit_lcluster('Not able to retrieve token.')
-        except requests.exceptions.Timeout:
-            self.exit_lcluster('Timeout while requesting for token.')
-        except requests.exceptions.TooManyRedirects:
-            self.exit_lcluster('Too Many Redirects while requesting for token.')
-        except requests.exceptions.RequestException:
-            self.exit_lcluster('Request Exception while requesting for token.')
+        if os.path.isfile(TOKEN_FILE):
+            with open(TOKEN_FILE, 'r', encoding='utf-8') as token:
+                token_data = token.read()
+                try:
+                    jwt.decode(token_data, self.secret_key, algorithms=['HS256'])
+                    response = token_data
+                except jwt.exceptions.DecodeError:
+                    sys.stderr.write('Token Decode Error, Getting New Token.\n')
+                    response = self.token()
+                except jwt.exceptions.ExpiredSignatureError:
+                    sys.stderr.write('Expired Signature Error, Getting New Token.\n')
+                    response = self.token()
+        if response is False:
+            response = self.token()
         return response
 
 
@@ -97,29 +141,179 @@ class LCluster():
         Method to call the class for further
         operations.
         """
-        result = []
         node_url = f'{self.daemon}/config/node'
         get_node_list = self.get_data(node_url, True)
-        self.sensu_data = self.get_data(self.sensu_url)
+        sensu_data = self.get_data(self.sensu_url)
         slurm = self.choose_slurm()
         if get_node_list:
-            sno = 1
+            response, nodes = [], []
+            node_status, sensu_state = {}, {}
             for node in get_node_list['config']['node']:
-                rows = []
-                self.node_hostname = get_node_list['config']['node'][node]['hostname']
-                self.node = node
-                rows.append(self.get_colored(sno))
-                rows.append(self.get_colored(self.node))
-                rows.append(self.get_colored(self.node_ipmi()))
-                rows.append(self.get_colored(self.node_status()))
-                rows.append(self.get_colored(self.call_slurm(slurm)))
-                rows.append(self.get_colored(self.check_sensu()))
-                result.append(rows)
-                sno = sno + 1
-        if result:
-            self.show_table(result)
+                nodes.append(node)
+                if get_node_list['config']['node'][node]['hostname']:
+                    sensu_state[get_node_list['config']['node'][node]['hostname']] = False
+                else:
+                    sensu_state[node] = False
+                node_status[node] = get_node_list['config']['node'][node]['status']
+            ipmi_state = self.get_ipmi_state(nodes)
+            slurm_state = self.call_slurm(slurm, nodes)
+            sensu_state = self.check_sensu(sensu_state, sensu_data)
+            count = 1
+            for node, _ in ipmi_state.items():
+                response.append([
+                    self.get_colored(count),
+                    self.get_colored(node),
+                    self.get_colored(ipmi_state[node]),
+                    self.get_colored(node_status[node]),
+                    self.get_colored(slurm_state[node]),
+                    self.get_colored(sensu_state[node])
+                    ]
+                )
+                count = count + 1
+            self.show_table(response)
         else:
-            self.exit_lcluster('No Nodes are available.')
+            self.exit_lcluster(f'No Nodes available with {self.daemon}')
+
+
+    def get_ipmi_state(self, nodes):
+        """IPMI Check"""
+        msg = f'Wait, Fetching IMPI Status of Nodes with {self.daemon} ...\n'
+        sys.stdout.write(colored(msg, 'yellow'))
+        failed, off, working = [], [], []
+        node_hostlist = collect_hostlist(nodes)
+        if node_hostlist:
+            ipmi_url = f'{self.daemon}/control/power'
+            payload = {'control': {'power': {'status': {'hostlist': node_hostlist}}}}
+            ipmi_response = self.post_data(ipmi_url, True, payload)
+            if ipmi_response.status_code == 200:
+                http_response = ipmi_response.json()
+                request_id = http_response['control']['power']['request_id']
+                ipmi_status_url = f'{self.daemon}/control/status/{request_id}'
+                if 'failed' in http_response['control']['power'].keys():
+                    if http_response['control']['power']['failed']['hostlist']:
+                        failed = http_response['control']['power']['failed']['hostlist'].split(',')
+                if 'off' in http_response['control']['power'].keys():
+                    if http_response['control']['power']['off']['hostlist']:
+                        off = http_response['control']['power']['off']['hostlist'].split(',')
+                if 'on' in http_response['control']['power'].keys():
+                    if http_response['control']['power']['on']['hostlist']:
+                        working = http_response['control']['power']['on']['hostlist'].split(',')
+
+                def get_status_ipmi(ipmi_status_url, failed, off, working):
+                    sleep(2)
+                    ipmi_status_response = self.get_data_real(ipmi_status_url, True)
+                    if ipmi_status_response.status_code == 200:
+                        ipmi_status = ipmi_status_response.json()
+                        if ipmi_status['control']['power']['failed']['hostlist']:
+                            new_failed = ipmi_status['control']['power']['failed']['hostlist']
+                            failed.append(new_failed.split(','))
+                        if ipmi_status['control']['power']['off']['hostlist']:
+                            new_off = ipmi_status['control']['power']['off']['hostlist']
+                            off.append(new_off.split(','))
+                        if ipmi_status['control']['power']['on']['hostlist']:
+                            new_on = ipmi_status['control']['power']['on']['hostlist']
+                            working.append(new_on.split(','))
+                        return get_status_ipmi(ipmi_status_url, failed, off, working)
+                    elif ipmi_status_response.status_code == 404:
+                        return failed, off, working
+                    else:
+                        sys.stderr.write('Something is wrong with IPMI Service\n')
+                        return failed, off, working
+
+                failed, off, working = get_status_ipmi(ipmi_status_url, failed, off, working)
+            else:
+                error = f'Control is not working as expected ==> {ipmi_url}\n'
+                error = f'{error}HTTP ERROR ==> {ipmi_response.status_code}\n'
+                error = f'{error}RESPONSE ==> {ipmi_response.content}'
+                self.exit_lcluster(error)
+
+        response = {}
+        for node in nodes:
+            if node in failed:
+                response[node] = 'Failed'
+            if node in off:
+                response[node] = 'OFF'
+            if node in working:
+                response[node] = 'ON'
+        return response
+
+
+    def post_data(self, url=None, daemon=False, payload=None):
+        """
+        This method will make a get request and fetch the data accordingly.
+        """
+        response = None
+        try:
+            if daemon:
+                headers = {'x-access-tokens': self.get_token()}
+                if payload:
+                    response = requests.post(url=url, headers=headers, json=payload, timeout=5)
+                else:
+                    response = requests.post(url=url, headers=headers, timeout=5)
+            else:
+                response = requests.get(url=url , timeout=5)
+        except requests.exceptions.Timeout:
+            self.exit_lcluster(f'Timeout on {url}.')
+        except requests.exceptions.TooManyRedirects:
+            self.exit_lcluster(f'Too Many Redirects on {url}.')
+        # except requests.exceptions.RequestException:
+        #     self.exit_lcluster(f'Request Exception on {url}.')
+        return response
+
+
+    def get_data_real(self, url=None, daemon=False, payload=None):
+        """
+        This method will make a get request and fetch the data
+        accordingly.
+        """
+        try:
+            if daemon:
+                headers = {'x-access-tokens': self.get_token()}
+                if payload:
+                    call = requests.get(url=url, headers=headers, json=payload, timeout=5)
+                else:
+                    call = requests.get(url=url, headers=headers, timeout=5)
+            else:
+                call = requests.get(url=url , timeout=5)
+            # response = call.json()
+            response = call
+        except requests.exceptions.Timeout:
+            self.exit_lcluster(f'Timeout on {url}.')
+            response = None
+        except requests.exceptions.TooManyRedirects:
+            self.exit_lcluster(f'Too Many Redirects on {url}.')
+            response = None
+        except requests.exceptions.RequestException:
+            self.exit_lcluster(f'Request Exception on {url}.')
+            response = None
+        return response
+
+
+    def get_data(self, url=None, daemon=False, payload=None):
+        """
+        This method will make a get request and fetch the data
+        accordingly.
+        """
+        try:
+            if daemon:
+                headers = {'x-access-tokens': self.get_token()}
+                if payload:
+                    call = requests.get(url=url, headers=headers, json=payload, timeout=5)
+                else:
+                    call = requests.get(url=url, headers=headers, timeout=5)
+            else:
+                call = requests.get(url=url , timeout=5)
+            response = call.json()
+        except requests.exceptions.Timeout:
+            self.exit_lcluster(f'Timeout on {url}.')
+            response = None
+        except requests.exceptions.TooManyRedirects:
+            self.exit_lcluster(f'Too Many Redirects on {url}.')
+            response = None
+        except requests.exceptions.RequestException:
+            self.exit_lcluster(f'Request Exception on {url}.')
+            response = None
+        return response
 
 
     def get_colored(self, text=None):
@@ -127,11 +321,11 @@ class LCluster():
         This method will fetch a records from
         the Luna 2 Daemon Database
         """
-        if text is True or text == 'PASS':
+        if text is True or text in ['PASS', 'ON']:
             text = colored(text, 'green')
-        elif text is False or text in ['CRITICAL', 'Sensu Down']:
+        elif text is False or text in ['CRITICAL', 'Sensu Down'] or text is None:
             text = colored(text, 'red')
-        elif text == 'WARNING':
+        elif text in ['OFF', 'WARNING']:
             text = colored(text, 'yellow')
         else:
             text = colored(text, 'blue')
@@ -154,79 +348,44 @@ class LCluster():
         return True
 
 
-    def get_data(self, url=None, daemon=False):
-        """
-        This method will make a get request and fetch the data
-        accordingly.
-        """
-        try:
-            if daemon:
-                headers = {'x-access-tokens': self.token}
-                call = requests.get(url=url, headers=headers, timeout=5)
-            else:
-                call = requests.get(url=url , timeout=5)
-            response = call.json()
-        except requests.exceptions.Timeout:
-            print(f'Timeout on {url}.')
-            response = None
-        except requests.exceptions.TooManyRedirects:
-            print(f'Too Many Redirects on {url}.')
-            response = None
-        except requests.exceptions.RequestException:
-            print(f'Request Exception on {url}.')
-            response = None
-        return response
-
-
-    def node_ipmi(self):
-        """
-        This method return the IPMI status for a node.
-        """
-        response = False
-        ipmi_url = f'{self.daemon}/control/power/{self.node}/_status'
-        data = self.get_data(ipmi_url, True)
-        if data:
-            response = data['control']['status']
-        return response
-
-
-    def node_status(self):
+    def node_status(self, node):
         """
         This method return the status of a node.
         """
         response = False
-        monitor_url = f'{self.daemon}/monitor/status/{self.node}'
+        monitor_url = f'{self.daemon}/monitor/status/{node}'
         data = self.get_data(monitor_url, True)
         if data:
-            response = data['monitor']['status'][self.node]['state']
+            response = data['monitor']['status'][node]['state']
         return response
 
 
-    def check_sensu(self):
+    def check_sensu(self, nodelist=None, sensu_data=None):
         """
         This method will filter the correct status for the Sensu
         for a node.
         """
-        if self.sensu_data:
-            for data in self.sensu_data:
-                if self.node_hostname in data['client']['name']:
-                    if data['check']['status'] == 1:
-                        response = "WARNING"
-                    elif data['check']['status'] == 2:
-                        response = "CRITICAL"
+        if sensu_data:
+            for node in nodelist:
+                for data in sensu_data:
+                    if node in data['client']['name']:
+                        if data['check']['status'] == 1:
+                            nodelist[node] = "WARNING"
+                        elif data['check']['status'] == 2:
+                            nodelist[node] = "CRITICAL"
+                        else:
+                            nodelist[node] = "UNKNOWN"
                     else:
-                        response = "UNKNOWN"
-                else:
-                    response = "PASS"
+                        nodelist[node] = "PASS"
         else:
-            response = "Sensu Down"
-        return response
+            for node in nodelist:
+                nodelist[node] = "Sensu Down"
+        return nodelist
 
 
     def choose_slurm(self):
         """
-        This method find out slurm version and decide, if use
-        slurm cmd or api
+        This method find out slurm version and decide, if use slurm cmd or api
         """
         response = 'cmd'
         cmd = '/usr/sbin/slurmd -V | cut -d " " -f2'
@@ -243,51 +402,57 @@ class LCluster():
         return response
 
 
-    def call_slurm(self, state=None):
+    def call_slurm(self, state=None, nodes=None):
         """
-        This method will call the slurm cmd or api method
-        depends on the state.
+        This method will call the slurm cmd or api method depends on the state.
         """
         if 'api' in state:
-            response = self.slurm_api_state()
+            response = self.slurm_api_state(nodes)
         elif 'cmd' in state:
-            response = self.slurm_cmd_state()
+            response = self.slurm_cmd_state(nodes)
         else:
             response = False
         return response
 
 
-    def slurm_cmd_state(self):
+    def slurm_cmd_state(self, nodes):
         """
-        This method   the slurm state for a node
-        via sinfo command with grep and cut
+        This method fetch slurm state via sinfo command and filter the actual state
         """
-        response = False
-        cmd = f'sinfo -N -o "%N %6T" | grep {self.node} | cut -d " " -f2'
+        response = {}
+        for node in nodes:
+            response[node] = False
+        cmd = 'sinfo -N -o "%N %6T"'
         return_code, stdout, _, _ = self.run_cmd(cmd)
-
         if not return_code:
             stdout = str(stdout).replace("b", '')
             stdout = stdout.replace("'", '')
-            stdout = stdout.replace("\\n", '')
-            if stdout:
-                response = stdout
+            stdout = stdout.split('\\n')
+            for node in nodes:
+                for res in stdout:
+                    if node in res:
+                        res = res.replace(node, '')
+                        res = res.replace(' ', '')
+                        response[node] = res
         return response
 
 
-    def slurm_api_state(self):
+    def slurm_api_state(self, nodes):
         """
         This method find out the slurm state for a node
         via sinfo command with grep and cut
         """
-        response = False
-        api = f'/slurm/v0.0.38/node/{self.node}'
+        response = {}
+        for node in nodes:
+            response[node] = False
+        api = f'/slurm/v0.0.38/node/{nodes[0]}'
         print(api)
         ## TODO
         ## Figure out Actual Slurm API URL, make URL, header and payloads.
         ## Call API, retrieve and iterate data, and revert
+        response = False
         if response is False:
-            response = self.slurm_cmd_state()
+            response = self.slurm_cmd_state(nodes)
         return response
 
 

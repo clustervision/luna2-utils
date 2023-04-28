@@ -2,6 +2,7 @@
     "python.linting.pylintEnabled": true,
     "python.linting.enabled": true,
     "cSpell.words": [
+        "hostlist",
         "lcluster",
         "prettytable",
         "sinfo",
