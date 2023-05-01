@@ -24,110 +24,10 @@ import requests
 import jwt
 from prettytable import PrettyTable
 from termcolor import colored
+import requests_unixsocket
 
 TOKEN_FILE = '/tmp/token.txt'
 INI_FILE = '/trinity/local/luna/config/luna.ini'
-
-SLURM_DUMMY_TEXT = '''{
-    "meta": {"plugin": {"type": "openapi\/v0.0.38", "name": "Slurm OpenAPI v0.0.38"}, "Slurm": {"version": {"major": 22, "micro": 2,  "minor": 5}, "release": "22.05.2"}},
-    "errors": [],
-    "nodes": [{
-        "architecture": "x86_64",
-        "burstbuffer_network_address": "",
-        "boards": 1,
-        "boot_time": 1678202984,
-        "comment": "",
-        "cores": 1,
-        "cpu_binding": 0,
-        "cpu_load": 24,
-        "extra": "",
-        "free_memory": 595,
-        "cpus": 1,
-        "last_busy": 1682945109,
-        "features": "",
-        "active_features": "",
-        "gres": "",
-        "gres_drained": "N\/A",
-        "gres_used": "",
-        "mcs_label": "",
-        "name": "controller1",
-        "next_state_after_reboot": "invalid",
-        "address": "controller1",
-        "hostname": "controller1",
-        "state": "idle",
-        "state_flags": [],
-        "next_state_after_reboot_flags": [],
-        "operating_system": "Linux 4.18.0-372.13.1.el8_6.x86_64 #1 SMP Wed Jun 29 17:21:09 UTC 2022",
-        "owner": null,
-        "partitions": ["defq"],
-        "port": 6818,
-        "real_memory": 1000,
-        "reason": "",
-        "reason_changed_at": 0,
-        "reason_set_by_user": null,
-        "slurmd_start_time": 1682508296,
-        "sockets": 1,
-        "threads": 1,
-        "temporary_disk": 0,
-        "weight": 1,
-        "tres": "cpu=1,mem=1000M,billing=1",
-        "slurmd_version": "22.05.2",
-        "alloc_memory": 0,
-        "alloc_cpus": 0,
-        "idle_cpus": 1,
-        "tres_used": null,
-        "tres_weighted": 0.0
-    },
-    {
-        "architecture": "",
-        "burstbuffer_network_address": "",
-        "boards": 1,
-        "boot_time": 0,
-        "comment": "",
-        "cores": 1,
-        "cpu_binding": 0,
-        "cpu_load": 4294967294,
-        "extra": "",
-        "free_memory": -2,
-        "cpus": 1,
-        "last_busy": 1682945105,
-        "features": "",
-        "active_features": "",
-        "gres": "",
-        "gres_drained": "N\/A",
-        "gres_used": "",
-        "mcs_label": "",
-        "name": "node001",
-        "next_state_after_reboot": "invalid",
-        "address": "node001",
-        "hostname": "node001",
-        "state": "down",
-        "state_flags": ["NOT_RESPONDING"],
-        "next_state_after_reboot_flags": [],
-        "operating_system": "",
-        "owner": null,
-        "partitions": ["defq"],
-        "port": 6818,
-        "real_memory": 100,
-        "reason": "Not responding",
-        "reason_changed_at": 1682434029,
-        "reason_set_by_user": "root",
-        "slurmd_start_time": 0,
-        "sockets": 1,
-        "threads": 1,
-        "temporary_disk": 0,
-        "weight": 1,
-        "tres": "cpu=1,mem=100M,billing=1",
-        "slurmd_version": "",
-        "alloc_memory": 0,
-        "alloc_cpus": 0,
-        "idle_cpus": 1,
-        "tres_used": null,
-        "tres_weighted": 0.0
-    }]
-}'''
-
-
 
 
 class LCluster():
@@ -544,26 +444,31 @@ class LCluster():
         """
         This method find out the slurm state for all nodes from slurm api.
         """
-        response, slurm_response = {}, json.loads(SLURM_DUMMY_TEXT)
+        response, slurm_response = {}, {}
         for node in nodes:
             response[node] = False
-        # ## TODO
-        # try:
-        #     headers = {'X-SLURM-USER-NAME': 'DUMMY-USERNAME', 'X-SLURM-USER-TOKEN': 'DUMMY-TOKEN'}
-        #     call_slurm = requests.get(url=self.slurm_url, headers=headers, timeout=5)
-        #     slurm_response = call_slurm.json()
-        # except requests.exceptions.Timeout:
-        #     print(f'Timeout on {self.slurm_url}.')
-        #     for node in nodes:
-        #         response[node] = "TIME OUT"
-        # except requests.exceptions.TooManyRedirects:
-        #     print(f'Too Many Redirects on {self.slurm_url}.')
-        #     for node in nodes:
-        #         response[node] = "SLURM Redirect"
-        # except requests.exceptions.RequestException:
-        #     print(f'Request Exception on {self.slurm_url}.')
-        #     for node in nodes:
-        #         response[node] = "SLURM Down"
+        try:
+            session = requests_unixsocket.Session()
+            slurm_call = session.get('http+unix://%2Fvar%2Flib%2Fslurmrestd.socket/slurm/v0.0.38/nodes')
+            slurm_response = slurm_call.json()
+        except Exception as exp:
+            print(f"UNIX SOCKET Exception while calling Slurm {exp}")
+            try:
+                headers = {'X-SLURM-USER-NAME': 'DUMMY-USERNAME', 'X-SLURM-USER-TOKEN': 'DUMMY-TOKEN'}
+                call_slurm = requests.get(url=self.slurm_url, headers=headers, timeout=5)
+                slurm_response = call_slurm.json()
+            except requests.exceptions.Timeout:
+                print(f'Timeout on {self.slurm_url}.')
+                for node in nodes:
+                    response[node] = "TIME OUT"
+            except requests.exceptions.TooManyRedirects:
+                print(f'Too Many Redirects on {self.slurm_url}.')
+                for node in nodes:
+                    response[node] = "SLURM Redirect"
+            except requests.exceptions.RequestException:
+                print(f'Request Exception on {self.slurm_url}.')
+                for node in nodes:
+                    response[node] = "SLURM Down"
         if slurm_response:
             for node in nodes:
                 for state in slurm_response['nodes']:
