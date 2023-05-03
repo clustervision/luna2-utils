@@ -2,12 +2,16 @@
     "python.linting.pylintEnabled": true,
     "python.linting.enabled": true,
     "cSpell.words": [
+        "Flib",
+        "Fslurmrestd",
+        "Fvar",
         "hostlist",
         "lcluster",
         "prettytable",
         "sinfo",
         "slurm",
         "slurmd",
-        "termcolor"
+        "termcolor",
+        "unixsocket"
     ]
 }

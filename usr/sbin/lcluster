@@ -14,7 +14,6 @@ __status__      = "Development"
 
 import os
 import sys
-import json
 from time import sleep
 from configparser import RawConfigParser
 import subprocess as sp
@@ -449,12 +448,13 @@ class LCluster():
             response[node] = False
         try:
             session = requests_unixsocket.Session()
-            slurm_call = session.get('http+unix://%2Fvar%2Flib%2Fslurmrestd.socket/slurm/v0.0.38/nodes')
+            socket_cmd = 'http+unix://%2Fvar%2Flib%2Fslurmrestd.socket/slurm/v0.0.38/nodes'
+            slurm_call = session.get(socket_cmd)
             slurm_response = slurm_call.json()
         except Exception as exp:
             print(f"UNIX SOCKET Exception while calling Slurm {exp}")
             try:
-                headers = {'X-SLURM-USER-NAME': 'DUMMY-USERNAME', 'X-SLURM-USER-TOKEN': 'DUMMY-TOKEN'}
+                headers = {'X-SLURM-USER-NAME': 'USERNAME', 'X-SLURM-USER-TOKEN': 'TOKEN'}
                 call_slurm = requests.get(url=self.slurm_url, headers=headers, timeout=5)
                 slurm_response = call_slurm.json()
             except requests.exceptions.Timeout:
