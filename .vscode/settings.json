@@ -2,15 +2,19 @@
     "python.linting.pylintEnabled": true,
     "python.linting.enabled": true,
     "cSpell.words": [
+        "alloc",
+        "cpus",
         "Flib",
         "Fslurmrestd",
         "Fvar",
         "hostlist",
         "lcluster",
         "prettytable",
+        "sdiag",
         "sinfo",
         "slurm",
         "slurmd",
+        "squeue",
         "termcolor",
         "unixsocket"
     ]
