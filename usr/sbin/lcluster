@@ -152,7 +152,7 @@ class LCluster():
             node_status, sensu_state = {}, {}
             for node in get_node_list['config']['node']:
                 nodes.append(node)
-                if get_node_list['config']['node'][node]['hostname']:
+                if 'hostname' in get_node_list['config']['node'][node]:
                     sensu_state[get_node_list['config']['node'][node]['hostname']] = False
                 else:
                     sensu_state[node] = False
@@ -168,7 +168,7 @@ class LCluster():
                     self.get_colored(ipmi_state[node]),
                     self.get_colored(node_status[node]),
                     self.get_colored(slurm_state[node]),
-                    self.get_colored(sensu_state[node])
+                    self.get_colored(sensu_state[get_node_list['config']['node'][node]['hostname']])
                     ]
                 )
                 count = count + 1
