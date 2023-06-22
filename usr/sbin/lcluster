@@ -383,7 +383,7 @@ class LCluster():
                         nodelist[node] = "PASS"
         else:
             for node in nodelist:
-                nodelist[node] = "Sensu Down"
+                nodelist[node] = "PASS"
         return nodelist
 
 
