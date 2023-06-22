@@ -233,10 +233,12 @@ class LCluster():
         for node in nodes:
             if node in failed:
                 response[node] = 'Failed'
-            if node in off:
+            elif node in off:
                 response[node] = 'OFF'
-            if node in working:
+            elif node in working:
                 response[node] = 'ON'
+            else:
+                response[node] = None
         return response
 
 
