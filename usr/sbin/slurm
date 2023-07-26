@@ -32,7 +32,7 @@ class Slurm():
         """
         protocol, hostname, port, database = self.info()
         self.slurm_version = 'v0.0.38'
-        self.request_time = int(datetime.utcnow().timestamp())
+        self.request_time = int(datetime.now().timestamp())
         self.hostname = f'hostname={os.uname().nodename}'
         self.socket_cmd = 'http+unix://%2Fvar%2Flib%2Fslurmrestd.socket'
         self.line_protocol = ''
