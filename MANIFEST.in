@@ -1,0 +1,10 @@
+include requirements.txt
+include VERSION.txt
+include README.md
+include usr/sbin/bootutil
+include usr/sbin/bootutil.py
+include usr/sbin/lchroot
+include usr/sbin/lcluster
+include usr/sbin/lpower
+include usr/sbin/slurm
+include usr/sbin/slurm.ini
