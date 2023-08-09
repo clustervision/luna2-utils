@@ -52,7 +52,8 @@ class Slurm():
         """
         This method is responsible to collect and provide the connection information to this script.
         """
-        slurm_config = 'slurm.ini'
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        slurm_config = f'{dir_path}/slurm.ini'
         protocol, hostname, port, database = False, False, False, False
         file_check = os.path.isfile(slurm_config)
         read_check = os.access(slurm_config, os.R_OK)
@@ -215,6 +216,27 @@ class Slurm():
         except requests.exceptions.ConnectionError:
             sys.stderr.write(f'Connection Error :: {self.workload_url}\n')
         return response
+
+
+def main():
+    """
+    This main method will initiate the script for pip installation.
+    """
+    slurm = Slurm()
+    STATISTICS = slurm.get_statistics()
+    if STATISTICS:
+        RESPONSE = slurm.post_statistics()
+        if RESPONSE:
+            sys.stdout.write(RESPONSE)
+            sys.exit(0)
+        else:
+            sys.stderr.write(f'Unable to POST on :: {slurm.workload_url}\n')
+            sys.stderr.write('POST PAYLOAD --->>\n')
+            sys.stderr.write(f'{slurm.line_protocol}\n')
+            sys.exit(1)
+    else:
+        sys.stderr.write(f'Not able to find statistics with Slurm Version {slurm.slurm_version}\n')
+        sys.exit(1)
 
 
 if __name__ == "__main__":
