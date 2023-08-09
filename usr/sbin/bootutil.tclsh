@@ -1,0 +1,250 @@
+#!/usr/bin/tclsh
+#
+# Bootutil: Utility to set boot order via Redfish
+#
+
+set httpuser		""
+set httppassword	""
+set host                ""
+
+package require http 2
+package require base64
+package require json
+package require json::write
+
+
+proc redfish_get {url} {
+  # Get JSON data at the specified Redfish URL and return this data in the form
+  # of a TCL dictionary
+  global httpuser httppassword
+
+  set auth "Basic [base64::encode $httpuser:$httppassword]"
+  set httpheaders [list Authorization $auth]
+  set token [http::geturl $url -headers $httpheaders]
+  upvar "#0" $token httpresult
+  set redfish_data [json::json2dict $httpresult(body)]
+  http::cleanup $token
+  return $redfish_data
+}
+
+proc redfish_patch {url etag json_data} {
+  # Get JSON data at the specified Redfish URL and return this data in the form
+  # of a TCL dictionary
+  global httpuser httppassword
+
+  set auth "Basic [base64::encode $httpuser:$httppassword]"
+  set httpheaders [list Authorization $auth Content-Type "application/json" If-Match $etag]
+  set token [http::geturl $url -method PATCH -headers $httpheaders -query $json_data]
+  upvar "#0" $token httpresult
+#  set redfish_data [json::json2dict $httpresult(body)]
+#  set redfish_data $httpresult(body)
+  set r [list [http::ncode $token] [http::code $token]]
+  http::cleanup $token
+  return $r
+}
+
+
+proc get_bootoption_urls {host system} {
+  set bootoptionsurl "$host/redfish/v1/Systems/$system/BootOptions"
+  set bootoptions [redfish_get $bootoptionsurl]
+  set members [dict get $bootoptions Members]
+  set bootoption_urls {}
+  foreach m $members {
+    lappend bootoption_urls [lindex $m 1]
+  }
+  return $bootoption_urls
+}
+
+proc get_system_urls {host} {
+  set systemsurl "$host/redfish/v1/Systems"
+  set systems [redfish_get $systemsurl]
+  set members [dict get $systems Members]
+  set system_urls {}
+  foreach m $members {
+    lappend system_urls [lindex $m 1]
+  }
+  return $system_urls
+}
+
+proc get_boot_option_id_name_desc {url} {
+  global host
+
+  set bootoption [redfish_get "$host$url"]
+  set id [dict get $bootoption Id]
+  set name [dict get $bootoption Name]
+  set desc [dict get $bootoption Description]
+  return [list $id $name $desc]
+}
+
+proc get_bootorder {system} {
+  global host
+
+  set systemdata [redfish_get "$host/redfish/v1/Systems/$system"]
+  set bootdata [dict get $systemdata Boot]
+  set bootorder [dict get $bootdata BootOrder]
+  return $bootorder
+}
+
+proc get_system_etag {system} {
+  global host
+
+  set systemdata [redfish_get "$host/redfish/v1/Systems/$system"]
+  set etag [dict get $systemdata @odata.etag]
+  return $etag
+}
+
+proc set_bootorder {system etag bootorder} {
+  global host
+
+  set url "$host/redfish/v1/Systems/$system"
+  set redfish_data [dict create BootOrder $bootorder]
+  set json [json::dict2json $redfish_data]
+  set json_bootorder ""
+  foreach bootoption $bootorder {
+    lappend json_bootorder [json::write string $bootoption]
+  }
+  set json [json::write object BootOrder [json::write array {*}$json_bootorder]]
+  set json [json::write object Boot $json]
+  set result [redfish_patch $url $etag $json]
+  return $result
+}
+
+#
+# Parse command line options
+#
+set mode ""
+set display_help 0
+if {[llength $argv] > 0 } then {
+  set state "option"
+  foreach arg $argv {
+    switch $state {
+      {option} {
+        switch -regexp $arg {
+          {-U|--user} {
+            set state "user"
+          }
+          {-P|--password} {
+            set state "password"
+          }
+          {-H|--host} {
+            set state "host"
+          }
+          {list} {
+            set mode "list"
+          }
+          {get} {
+            set mode "get"
+          }
+          {set} {
+            set mode "set"
+            set state "set"
+          }
+        }
+      }
+      {user} {
+        set httpuser $arg
+        set state "option"
+      }
+      {password} {
+        set httppassword $arg
+        set state "option"
+      }
+      {host} {
+        set host $arg
+        set state "option"
+      }
+      {set} {
+        set desired_bootorder $arg
+        set state "option"
+      }
+    }
+  }
+} else {
+  set display_help 1
+}
+
+#
+# Validate command line options
+#
+if {$mode eq ""} then {
+  puts stderr "Please specify a mode on the command line."
+  set display_help 1
+}
+if {$host eq ""} then {
+  puts stderr "Please specify a host on the command line."
+  set display_help 1
+}
+if {$httpuser eq ""} then {
+  puts stderr "Please specify a http user on the command line."
+  set display_help 1
+}
+if {$httppassword eq ""} then {
+  puts stderr "Please specify a http password on the command line."
+  set display_help 1
+}
+
+if $display_help then {
+  puts stderr ""
+  puts stderr {Usage: bootutil [options...] <mode>}
+  puts stderr ""
+  puts stderr "<mode> can be either:"
+  puts stderr "  list         -- list available boot options"
+  puts stderr "  get          -- get current boot order"
+  puts stderr "  set <order>  -- set current boot order"
+  puts stderr ""
+  puts stderr {Available [options...]:}
+  puts stderr " -H, --host      -- Redfish host. Must include protocol, e.g. https://host"
+  puts stderr " -U, --user      -- HTTP user name"
+  puts stderr " -P, --password  -- HTTP user password"
+  exit 1
+}
+
+# Only load SSL library if https is requested.
+if [string match "https://*" $host] {
+  package require tls 1.7
+  http::register https 443 [list ::tls::socket -autoservername true]
+}
+
+#
+# Perform the requested task
+#
+
+set sy_urls [get_system_urls $host]
+if {[llength $sy_urls] == 1} then {
+  set system [file tail [lindex $sy_urls 0]]
+}
+set bo_urls [get_bootoption_urls $host $system]
+
+if {$mode == "list"} then {
+  puts "Available boot devices:"
+  puts ""
+  puts "ID    |Name            |Desc"
+  puts "------+----------------+------------------------------------------------------"
+}
+foreach bo_url [lsort $bo_urls] {
+  lassign [get_boot_option_id_name_desc $bo_url] id name desc
+  set bootoption($name) $desc
+  if {$mode == "list"} then {
+    puts [format "%-6s|%-16s|%-58s" $id $name $desc]
+  }
+}
+
+if {$mode == "get"} then {
+  puts "Current boot order:"
+  set bootorder [get_bootorder $system]
+  set i 1
+  foreach bo $bootorder {
+    puts "$i - $bo - $bootoption($bo)"
+    incr i
+  }
+}
+
+if {$mode == "set"} then {
+  set etag [get_system_etag $system]
+  lassign [set_bootorder $system $etag $desired_bootorder] ncode code
+  if [string match "2*" $ncode] then {
+    puts "Set boot order to \"$desired_bootorder\" succesfull! (HTTP-result: $code)"
+  } else {
+    puts "Set boot order to \"$desired_bootorder\" failed! (HTTP-result: $code)"
+  }
+}
