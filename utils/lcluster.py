@@ -504,5 +504,12 @@ class LCluster():
         return return_code, stdout, stderr, exception
 
 
+def main():
+    """
+    This main method will initiate the script for pip installation.
+    """
+    return LCluster().health_checkup()
+
+
 if __name__ == "__main__":
     LCluster().health_checkup()
