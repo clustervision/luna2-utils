@@ -243,19 +243,6 @@ def handleResults(DATA,request_id=None,subsystem=None,action=None):
                     else:
                         for node in DATA[control][subsystem][cat]:
                             print(f"{node}: {cat}")
-
-#            for power in DATA[control].keys():
-#                if 'request_id' in DATA[control][power]:
-#                    request_id=str(DATA[control][power]['request_id'])
-#                    #print(f"Request_id: [{request_id}]")
-#                    next
-#                for status in DATA[control][power].keys():
-#                    if 'hostlist' in DATA[control][power][status]:
-#                        for hostlist in DATA[control][power][status].keys():
-#                            if len(DATA[control][power][status][hostlist]) > 0:
-#                                list=str(DATA[control][power][status][hostlist]).split(',')
-#                                for node in list:
-#                                    print(f"{node}: {status}")
     return request_id
 
 # ----------------------------------------------------------------------------
