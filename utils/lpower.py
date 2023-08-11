@@ -31,6 +31,7 @@ def main(argv):
     GROUPS=None
     INTERFACES=None
     ACTION=None
+    SUBSYSTEM=None
     for i in range(0, len(argv)):
         if (argv[i] == "-h" or argv[i] == "--help"):
             callHelp()
@@ -40,8 +41,12 @@ def main(argv):
             GROUPS=argv[i]
         elif (argv[i] and not NODES):
             NODES=argv[i]
-        elif (argv[i] in ['status','on','off','reset','cycle','identify','noidentify']):
+        elif (argv[i] in ['status','on','off','reset','cycle']):
             ACTION=argv[i]
+            SUBSYSTEM='power'
+        elif (argv[i] in ['identify','noidentify']):
+            ACTION=argv[i]
+            SUBSYSTEM='chassis'
         else:
             print("Error: Invalid options used.")
             callHelp()
@@ -53,7 +58,7 @@ def main(argv):
         print("Error: Instruction incomplete. Nodes and Task expected.")
         callHelp()
         exit()
-    handleRequest(nodes=NODES,groups=GROUPS,action=ACTION)
+    handleRequest(nodes=NODES,groups=GROUPS,subsystem=SUBSYSTEM,action=ACTION)
     exit()
 
 # ============================================================================
@@ -138,7 +143,7 @@ def getToken():
 
 # ----------------------------------------------------------------------------
 
-def handleRequest(nodes=None,groups=None,interface=None,action=None):
+def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=None):
     if ((not nodes is None) and (not action is None)):
         if ('TOKEN' not in CONF):
             getToken()
@@ -156,7 +161,7 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
         # single node query we do with GET
         if (result and nodes == result.group(1)):
             try:
-                r = requests.get(f'http://{CONF["ENDPOINT"]}/control/power/{nodes}/{action}',headers=headers)
+                r = requests.get(f'http://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}',headers=headers)
                 status_code=str(r.status_code)
                 if (r.text):
                     DATA=json.loads(r.text)
@@ -181,14 +186,14 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
         # else, we have to work with a list. backend offloads this but we have to keep polling for updates
         else:
             try:
-                body = {'control': { 'power': { action: { 'hostlist': nodes } } } }
-                r = requests.post(f'http://{CONF["ENDPOINT"]}/control/power', json=body, headers=headers)
+                body = {'control': { subsystem: { action: { 'hostlist': nodes } } } }
+                r = requests.post(f'http://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', json=body, headers=headers)
                 status_code=str(r.status_code)
                 if (status_code in RET):
                     print(nodes+": failed: "+RET[status_code])
                 elif (r.text):
                     DATA=json.loads(r.text)
-                    request_id=handleResults(DATA)
+                    request_id=handleResults(DATA=DATA,subsystem=subsystem,action=action)
                     # ------------- loop to keep polling for updates. -----------------------------------------------
                     while r.status_code == 200:
                         sleep(2)
@@ -199,7 +204,7 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
                         if (r.text):
                             #print(f"DEBUG: {r.text}")
                             DATA=json.loads(r.text)
-                            handleResults(DATA)
+                            handleResults(DATA=DATA,subsystem=subsystem,action=action)
                     # -----------------------------------------------------------------------------------------------
                 else:
                     # when we don't know how to handle the returned data
@@ -218,22 +223,26 @@ def handleRequest(nodes=None,groups=None,interface=None,action=None):
 
 # ----------------------------------------------------------------------------
 
-def handleResults(DATA,request_id=None):
+def handleResults(DATA,request_id=None,subsystem=None,action=None):
     request_id=0
     if (type(DATA) is dict):
+        #print(f"DEBUG: {DATA} {subsystem} {action}")
         for control in DATA.keys():
-            for power in DATA[control].keys():
-                if 'request_id' in DATA[control][power]:
-                    request_id=str(DATA[control][power]['request_id'])
-                    #print(f"Request_id: [{request_id}]")
-                    next
-                for status in DATA[control][power].keys():
-                    if 'hostlist' in DATA[control][power][status]:
-                        for hostlist in DATA[control][power][status].keys():
-                            if len(DATA[control][power][status][hostlist]) > 0:
-                                list=str(DATA[control][power][status][hostlist]).split(',')
-                                for node in list:
-                                    print(f"{node}: {status}")
+            if 'request_id' in DATA[control]:
+                request_id=str(DATA[control]['request_id'])
+                #print(f"Request_id: [{request_id}]")
+                #next
+            if 'failed' in DATA[control]:
+                for node in DATA[control]['failed'].keys():
+                    print(f"{node}: {DATA[control]['failed'][node]}")
+            if subsystem in DATA[control]:
+                for cat in DATA[control][subsystem].keys():
+                    if cat == 'ok':
+                        for node in DATA[control][subsystem][cat]:
+                            print(f"{node}: {subsystem} {action}")
+                    else:
+                        for node in DATA[control][subsystem][cat]:
+                            print(f"{node}: {cat}")
     return request_id
 
 # ----------------------------------------------------------------------------
