@@ -187,13 +187,13 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
         else:
             try:
                 body = {'control': { subsystem: { action: { 'hostlist': nodes } } } }
-                r = requests.post(f'http://{CONF["ENDPOINT"]}/control/action/{subsystem}', json=body, headers=headers)
+                r = requests.post(f'http://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', json=body, headers=headers)
                 status_code=str(r.status_code)
                 if (status_code in RET):
                     print(nodes+": failed: "+RET[status_code])
                 elif (r.text):
                     DATA=json.loads(r.text)
-                    request_id=handleResults(DATA,subsystem)
+                    request_id=handleResults(DATA=DATA,subsystem=subsystem,action=action)
                     # ------------- loop to keep polling for updates. -----------------------------------------------
                     while r.status_code == 200:
                         sleep(2)
@@ -204,7 +204,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
                         if (r.text):
                             #print(f"DEBUG: {r.text}")
                             DATA=json.loads(r.text)
-                            handleResults(DATA,subsystem)
+                            handleResults(DATA=DATA,subsystem=subsystem,action=action)
                     # -----------------------------------------------------------------------------------------------
                 else:
                     # when we don't know how to handle the returned data
@@ -223,22 +223,26 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
 
 # ----------------------------------------------------------------------------
 
-def handleResults(DATA,request_id=None,subsystem=None):
+def handleResults(DATA,request_id=None,subsystem=None,action=None):
     request_id=0
     if (type(DATA) is dict):
+        #print(f"DEBUG: {DATA} {subsystem} {action}")
         for control in DATA.keys():
             if 'request_id' in DATA[control]:
                 request_id=str(DATA[control]['request_id'])
                 #print(f"Request_id: [{request_id}]")
                 #next
-            elif 'failed' in DATA[control]:
+            if 'failed' in DATA[control]:
                 for node in DATA[control]['failed'].keys():
-                    printf(f"{node}: {DATA[control]['failed'][node]}")
-            elif subsystem in DATA[control]:
-                for cat in ['on','off','ok']:
-                    if cat in DATA[control][subsystem]:
+                    print(f"{node}: {DATA[control]['failed'][node]}")
+            if subsystem in DATA[control]:
+                for cat in DATA[control][subsystem].keys():
+                    if cat == 'ok':
                         for node in DATA[control][subsystem][cat]:
-                            print(f"{node}: {DATA[control][subsystem][cat][node]}")
+                            print(f"{node}: {subsystem} {action}")
+                    else:
+                        for node in DATA[control][subsystem][cat]:
+                            print(f"{node}: {cat}")
 
 #            for power in DATA[control].keys():
 #                if 'request_id' in DATA[control][power]:
