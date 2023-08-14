@@ -62,6 +62,7 @@ setup(
             'lpower = utils.lpower:main',
             'lcluster = utils.lcluster:main',
             'lslurm = utils.slurm:main'
+            'limport = utils.limport:main'
         ]
     },
 	install_requires = requirements,
