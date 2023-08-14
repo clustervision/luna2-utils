@@ -38,7 +38,7 @@ def new_version():
 
 
 setup(
-	name = "luna2utils",
+	name = "luna2-utils",
 	version = new_version(),
 	description = "Luna 2 Utils are the basic utilities",
 	long_description = "Luna 2 Utils includes lchroot, lcluster, lpower, and slurm utilities.\
@@ -55,18 +55,20 @@ setup(
         "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "slurm", "Trinity",
         "ClusterVision", "Sumit", "Sumit Sharma"
     ],
-    scripts = [
-        'usr/sbin/bootutil',
-        'usr/sbin/lchroot',
-        'usr/sbin/lcluster',
-        'usr/sbin/lpower',
-        'usr/sbin/slurm'
-    ],
+    entry_points={
+        'console_scripts': [
+            'bootutil = utils:bootutil',
+            'lchroot = utils.bash_runner:lchroot',
+            'lpower = utils.lpower:main',
+            'lcluster = utils.lcluster:main',
+            'lslurm = utils.slurm:main'
+            'limport = utils.limport:main'
+        ]
+    },
 	install_requires = requirements,
 	dependency_links = [],
 	package_data = {
-        "luna2web": [
-            "*", "*.bootutil", "*.ini", "*.lchroot", "*.lcluster", "*.lpower", "*.slurm"]
+        "utils": ["*", "*.tclsh", "*.ini", "*.lchroot"]
     },
 	data_files = [],
 	zip_safe = False,

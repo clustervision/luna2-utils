@@ -1,4 +1,4 @@
-Requests==2.31.0
+requests==2.31.0
 requests-unixsocket==0.3.0
 python-hostlist==1.23.0
 PyJWT==2.8.0
@@ -6,4 +6,3 @@ prettytable==3.8.0
 termcolor==2.3.0
 openpyxl==3.1.2
 fire==0.5.0
-requests==2.30.0

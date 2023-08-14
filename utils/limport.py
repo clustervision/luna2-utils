@@ -12,8 +12,8 @@ __maintainer__  = "Diego Sonaglia"
 __email__       = "diego.sonaglia@clustervision.com"
 __status__      = "Development"
 
+import os
 import re
-import shutil
 import ipaddress
 from itertools import zip_longest
 from functools import partial
@@ -60,7 +60,8 @@ def get_network_info(network_name):
         
     Returns:
         dict: The network info'''
-    resp = requests.get(f'http://{LUNA_HOST}:{LUNA_PORT}/config/network/{network_name}')
+    resp = requests.get(
+        f'http://{LUNA_HOST}:{LUNA_PORT}/config/network/{network_name}')
     if resp.status_code != 200:
         return None
     else:
@@ -267,11 +268,15 @@ class NetworksSheet(ExcelSheet):
             validator = self.validators[header_cell.value]
             try:
                 validator(cell.value)
-                cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type = "solid")
+                cell.fill = PatternFill(start_color="C6EFCE",
+                                        end_color="C6EFCE",
+                                        fill_type = "solid")
                 cell.comment = None
             except (ValueError, TypeError, AttributeError) as exc:
                 print_error(f"Invalid value in cell {cell.coordinate}: {exc}")
-                cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type = "solid")
+                cell.fill = PatternFill(start_color="FFC7CE",
+                                        end_color="FFC7CE",
+                                        fill_type = "solid")
                 cell.comment = Comment(str(exc), "Invalid")
                 is_error = True
         return is_error
@@ -490,7 +495,7 @@ class CLI():
     Command that allows to bulk import nodes to luna from an excel file
     """
     def add(self, excel_path: str):
-        """Add the nodes to luna
+        """Check the excel file to be imported and add the nodes to luna
 
         Args:
             excel_path (str): The excel file to be imported
@@ -510,7 +515,7 @@ class CLI():
             exit(1)
 
     def validate(self, excel_path: str):
-        """Check the nodes to be imported
+        """Check the excel file to be imported
         
         Args:
             excel_path (str): The excel file to be validated"""
@@ -527,18 +532,31 @@ class CLI():
             exit(1)
 
     def template(self, target_path):
-        """Generate the excel file wiht the correct template by copying the template.xlsx file
+        """Copy the reference excel template to the target path
 
         Args:
             target_path (str): The path where the excel file will be generated
         """
+        template_path = os.path.join(
+            os.path.dirname(__file__),
+            '..',
+            'data',
+            'limport',
+            'nodes.xlsx')
         try:
-            shutil.copyfile('template.xlsx', target_path)
-            print_info(f"Template copied successfully in {target_path}")
+            os.system(f'cp {template_path} {target_path}')
+            print_info(f"Template successfully copied in {target_path}")
         except Exception as exc:
             print_error(f"Cannot copy the template to {target_path}: {exc}")
             exit(1)
 
 
-if __name__ == '__main__':
+def main():
+    '''
+    Main function
+    '''
     fire.Fire(CLI)
+
+
+if __name__ == '__main__':
+    main()
