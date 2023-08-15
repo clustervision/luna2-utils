@@ -20,7 +20,7 @@ import json
 import requests
 
 
-# ----------------------------------------------------------------------------
+# PENDING DIEGO 15 AUG 2023 -> need to test if sel commands on the backend work
 
 def readConfigFile():
     read=0
