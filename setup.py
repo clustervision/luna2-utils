@@ -38,20 +38,20 @@ def new_version():
 
 
 setup(
-	name = "luna2-utils",
-	version = new_version(),
-	description = "Luna 2 Utils are the basic utilities",
-	long_description = "Luna 2 Utils includes lchroot, lcluster, lpower, and slurm utilities.\
+    name = "luna2-utils",
+    version = new_version(),
+    description = "Luna 2 Utils are the basic utilities",
+    long_description = "Luna 2 Utils includes lchroot, lcluster, lpower, and slurm utilities.\
         With Luna 2 Utils, user can easily manage the power, cluster, etc. in Luna. ",
-	author = "Sumit Sharma",
-	author_email = "sumit.sharma@clustervision.com",
-	maintainer = "Sumit Sharma",
-	maintainer_email = "sumit.sharma@clustervision.com",
-	url = "https://gitlab.taurusgroup.one/clustervision/luna2-utils.git",
-	download_url = f"https://{PRE}@gitlab.taurusgroup.one/api/v4/projects/14/packages/pypi/simple",
-	packages = find_packages(),
-	license = "MIT",
-	keywords = [
+    author = "Sumit Sharma",
+    author_email = "sumit.sharma@clustervision.com",
+    maintainer = "Sumit Sharma",
+    maintainer_email = "sumit.sharma@clustervision.com",
+    url = "https://gitlab.taurusgroup.one/clustervision/luna2-utils.git",
+    download_url = f"https://{PRE}@gitlab.taurusgroup.one/api/v4/projects/14/packages/pypi/simple",
+    packages = find_packages(),
+    license = "MIT",
+    keywords = [
         "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "slurm", "Trinity",
         "ClusterVision", "Sumit", "Sumit Sharma"
     ],
@@ -61,31 +61,33 @@ setup(
             'lchroot = utils.bash_runner:lchroot',
             'lpower = utils.lpower:main',
             'lcluster = utils.lcluster:main',
-            'lslurm = utils.slurm:main'
-            'limport = utils.limport:main'
+            'lslurm = utils.slurm:main',
+            'limport = utils.limport:main',
+            'lnode = utils.lnode:main',
+            
         ]
     },
-	install_requires = requirements,
-	dependency_links = [],
-	package_data = {
+    install_requires = requirements,
+    dependency_links = [],
+    package_data = {
         "utils": ["*", "*.tclsh", "*.ini", "*.lchroot"]
     },
-	data_files = [],
-	zip_safe = False,
-	include_package_data = True,
-	classifiers = [
-		'Development Status :: Beta',
-		'Environment :: Luna 2 Command Line Utilities',
-		'Intended Audience :: System Administrators',
-		'License :: MIT',
-		'Operating System :: RockyLinux :: CentOS :: RedHat',
-		'Programming Language :: Python',
-		'Topic :: Trinity :: Luna'
-	],
-	platforms = [
-		'RockyLinux',
-		'CentOS',
-		'RedHat'
-	]
+    data_files = [],
+    zip_safe = False,
+    include_package_data = True,
+    classifiers = [
+        'Development Status :: Beta',
+        'Environment :: Luna 2 Command Line Utilities',
+        'Intended Audience :: System Administrators',
+        'License :: MIT',
+        'Operating System :: RockyLinux :: CentOS :: RedHat',
+        'Programming Language :: Python',
+        'Topic :: Trinity :: Luna'
+    ],
+    platforms = [
+        'RockyLinux',
+        'CentOS',
+        'RedHat'
+    ]
 )
 # python setup.py sdist bdist_wheel
