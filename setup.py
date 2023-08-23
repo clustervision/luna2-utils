@@ -13,6 +13,7 @@ __maintainer__  = 'Sumit Sharma'
 __email__       = 'sumit.sharma@clustervision.com'
 __status__      = 'Development'
 
+from time import time
 from setuptools import setup, find_packages
 
 PRE = "{Personal-Access-Token-Name}:{Personal-Access-Token}"
@@ -31,14 +32,15 @@ def new_version():
     """
     This Method will create a New version and update the Version file.
     """
-    version = "0.0.0"
-    with open('VERSION.txt', 'r', encoding='utf-8') as ver:
-        version = ver.read()
+    time_now = int(time())
+    version = f'2.0.{time_now}'
+    with open('utils/VERSION.txt', 'w', encoding='utf-8') as ver:
+        ver.write(version)
     return version
 
 
 setup(
-    name = "luna2-utils",
+    name = "luna2_utils",
     version = new_version(),
     description = "Luna 2 Utils are the basic utilities",
     long_description = "Luna 2 Utils includes lchroot, lcluster, lpower, and slurm utilities.\
@@ -64,7 +66,6 @@ setup(
             'lslurm = utils.slurm:main',
             'limport = utils.limport:main',
             'lnode = utils.lnode:main',
-            
         ]
     },
     install_requires = requirements,
