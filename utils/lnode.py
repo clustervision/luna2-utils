@@ -28,7 +28,7 @@ def readConfigFile():
     regex = re.compile("^(.[^=]+)\s+?=\s+?(.*)$")
     CONF = {}
     try:
-        with open("/trinity/local/luna/config/luna.ini") as f:
+        with open("/trinity/local/luna/cli/config/luna.ini") as f:
             for line in f:
                 if (not read):
                     result = api.match(line)
@@ -39,7 +39,7 @@ def readConfigFile():
                     if (result):
                         CONF[result.group(1)]=result.group(2)
     except:
-        print("Error: /trinity/local/luna/config/luna.ini Does not exist and i cannot continue.")
+        print("Error: /trinity/local/luna/config/cli/luna.ini Does not exist and i cannot continue.")
         exit(1)
 
     if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
@@ -102,7 +102,7 @@ class CLI():
         '''
         endpoint = f'http://{self._configs["ENDPOINT"]}/control/action/sel/{node}/_list'
         resp = self._send_request(endpoint, 'GET', None)
-        print(resp.text)
+        print(resp.text.replace(";;","\n"))
 
     def clear(self, nodes):
         '''
