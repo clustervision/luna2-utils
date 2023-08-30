@@ -43,8 +43,8 @@ function get_token {
     if [ -z $TOKEN ]; then
         json='{"username":"'${API_USERNAME}'", "password":"'${API_PASSWORD}'"}'
         response=$(curl -X POST -H "Content-Type: application/json" -d "$json" -s "${API_PROTOCOL}://${API_ENDPOINT}/token")
-        token=`echo $response | awk '{ print $2 }' | grep -oE '"(\S+)"'`
-        TOKEN=`echo "${token:1:-1}"`
+        token=$(echo $response | awk '{ print $2 }' | grep -oE '"(\S+)"')
+        TOKEN=$(echo "${token:1:-1}")
     fi
     echo $TOKEN
 }
