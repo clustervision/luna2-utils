@@ -13,7 +13,7 @@ __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
-#VERSION: 0.2.3
+#VERSION: 0.2.4
 
 import sys
 from builtins import dict
@@ -103,21 +103,21 @@ def readConfigFile():
         print("Error: /trinity/local/luna/cli/config/luna.ini Does not exist and i cannot continue.")
         exit(1)
 
-    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
+    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF) or ('PROTOCOL' not in CONF)):
         print("Error: username/password/endpoint not found in config file. i cannot continue.")
         exit(2)
 
 # ----------------------------------------------------------------------------
 
 def getToken():
-    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
+    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF) or ('PROTOCOL' not in CONF)):
         readConfigFile()
 
     RET={'401': 'invalid credentials', '400': 'bad request'}
 
     token_credentials = {'username': CONF['USERNAME'],'password': CONF['PASSWORD']}
     try:
-        x = requests.post('http://'+CONF["ENDPOINT"]+'/token', json = token_credentials)
+        x = requests.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/token', json = token_credentials)
         if (str(x.status_code) in RET):
             print("Error: "+RET[str(x.status_code)])
             exit(4)
@@ -161,7 +161,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
         # single node query we do with GET
         if (result and nodes == result.group(1)):
             try:
-                r = requests.get(f'http://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}',headers=headers)
+                r = requests.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}',headers=headers)
                 status_code=str(r.status_code)
                 if (r.text):
                     DATA=json.loads(r.text)
@@ -187,7 +187,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
         else:
             try:
                 body = {'control': { subsystem: { action: { 'hostlist': nodes } } } }
-                r = requests.post(f'http://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', json=body, headers=headers)
+                r = requests.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', json=body, headers=headers)
                 status_code=str(r.status_code)
                 if (status_code in RET):
                     print(nodes+": failed: "+RET[status_code])
@@ -197,7 +197,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
                     # ------------- loop to keep polling for updates. -----------------------------------------------
                     while r.status_code == 200:
                         sleep(2)
-                        r = requests.get(f'http://{CONF["ENDPOINT"]}/control/status/{request_id}',headers=headers)
+                        r = requests.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/status/{request_id}',headers=headers)
                         status_code=str(r.status_code)
                         if (r.status_code!=200):
                             return
@@ -226,7 +226,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
 def handleResults(DATA,request_id=None,subsystem=None,action=None):
     request_id=0
     if (type(DATA) is dict):
-        #print(f"DEBUG: {DATA} {subsystem} {action}")
+#        print(f"DEBUG: {DATA} {subsystem} {action}")
         for control in DATA.keys():
             if 'request_id' in DATA[control]:
                 request_id=str(DATA[control]['request_id'])
