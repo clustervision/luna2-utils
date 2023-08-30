@@ -18,17 +18,47 @@ function mount_d {
     mount -t proc     proc      $CHROOT_PATH/proc 2>/dev/null || NEED_UMOUNT_PROC=0
 }
 
+export LUNA_INI='/trinity/local/luna/cli/config/luna.ini'
+
+# --------------------------------------------
+
+if [ -f $LUNA_INI ]; then
+    while IFS='=' read -ra line; do
+        if [ ! "$(echo $line | grep -E '^(#|;)')" ] && [ "$line" ]; then
+            if [ "$(echo $line | grep '^\[')" ]; then
+                section=$(echo $line | grep -oE "[A-Z]+")
+            else
+                key=$(echo ${line[0]})
+                value=$(echo ${line[1]})
+                declare -x "${section}_${key}"="$value"
+            fi
+        fi
+    done < "$LUNA_INI"
+else
+    echo "No config file: $LUNA_INI"
+fi
+
+
+function get_token {
+    if [ ! -f /root/token.dat ]; then
+        json='{"username":"'${API_USERNAME}'", "password":"'${API_PASSWORD}'"}'
+        curl -X POST -H "Content-Type: application/json" -d "$json" -s "${API_PROTOCOL}://${API_ENDPOINT}/token" > /root/token.json
+        token=`cat /root/token.json | awk '{ print $2 }' | grep -oE '"(\S+)"'`
+        token=`echo "${token:1:-1}"`
+        echo $token > /root/token.dat
+    fi
+    cat /root/token.dat
+}
+
 OSIMAGE=$1
 if [ "x${OSIMAGE}" = "x" ]; then
     echo "osimage need to be specified."
     echo "Type 'luna osimage list' to get the list."
     exit 7
 fi
-#FAKE_KERN=$(luna osimage show $OSIMAGE --kernver | awk '$2~/<=/{print $1}')
-#CHROOT_PATH=$(luna osimage show $OSIMAGE --path)
-#FAKE_KERN=$(luna osimage show $OSIMAGE | grep kernelversion | tr -d '|' | awk {' print $2 }')
-#CHROOT_PATH=$(luna osimage show $OSIMAGE | grep path | tr -d '|' | awk {' print $2 }')
-getRet=$(curl -s http://192.168.164.202:7050/config/osimage/$OSIMAGE)
+token=$(get_token)
+getRet=$(curl -H "x-access-tokens: $token" -s "${API_PROTOCOL}://${API_ENDPOINT}/config/osimage/$OSIMAGE")
+#getRet=$(luna osimage show $OSIMAGE --raw | grep -vE '^(\+|\|)')
 FAKE_KERN=$(echo "$getRet" | jq --raw-output ".config.osimage.$OSIMAGE.kernelversion")
 CHROOT_PATH=$(echo "$getRet" | jq --raw-output ".config.osimage.$OSIMAGE.path")
 

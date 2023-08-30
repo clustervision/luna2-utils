@@ -189,6 +189,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
                 body = {'control': { subsystem: { action: { 'hostlist': nodes } } } }
                 r = requests.post(f'http://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', json=body, headers=headers)
                 status_code=str(r.status_code)
+                print(f"CODE: {status_code}")
                 if (status_code in RET):
                     print(nodes+": failed: "+RET[status_code])
                 elif (r.text):
@@ -199,6 +200,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
                         sleep(2)
                         r = requests.get(f'http://{CONF["ENDPOINT"]}/control/status/{request_id}',headers=headers)
                         status_code=str(r.status_code)
+                        print(f"CODE: {status_code}")
                         if (r.status_code!=200):
                             return
                         if (r.text):
@@ -226,7 +228,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
 def handleResults(DATA,request_id=None,subsystem=None,action=None):
     request_id=0
     if (type(DATA) is dict):
-        #print(f"DEBUG: {DATA} {subsystem} {action}")
+        print(f"DEBUG: {DATA} {subsystem} {action}")
         for control in DATA.keys():
             if 'request_id' in DATA[control]:
                 request_id=str(DATA[control]['request_id'])
