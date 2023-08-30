@@ -38,16 +38,15 @@ else
     echo "No config file: $LUNA_INI"
 fi
 
-
+TOKEN=""
 function get_token {
-    if [ ! -f /root/token.dat ]; then
+    if [ -z $TOKEN ]; then
         json='{"username":"'${API_USERNAME}'", "password":"'${API_PASSWORD}'"}'
-        curl -X POST -H "Content-Type: application/json" -d "$json" -s "${API_PROTOCOL}://${API_ENDPOINT}/token" > /root/token.json
-        token=`cat /root/token.json | awk '{ print $2 }' | grep -oE '"(\S+)"'`
-        token=`echo "${token:1:-1}"`
-        echo $token > /root/token.dat
+        response=$(curl -X POST -H "Content-Type: application/json" -d "$json" -s "${API_PROTOCOL}://${API_ENDPOINT}/token")
+        token=`echo $response | awk '{ print $2 }' | grep -oE '"(\S+)"'`
+        TOKEN=`echo "${token:1:-1}"`
     fi
-    cat /root/token.dat
+    echo $TOKEN
 }
 
 OSIMAGE=$1
