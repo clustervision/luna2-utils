@@ -11,6 +11,8 @@
         "hostlist",
         "lchroot",
         "lcluster",
+        "limport",
+        "lnode",
         "lpower",
         "lslurm",
         "prettytable",
