@@ -40,7 +40,7 @@ def new_version():
 
 
 setup(
-    name = "luna2_utils",
+    name = "luna2-utils",
     version = new_version(),
     description = "Luna 2 Utils are the basic utilities",
     long_description = "Luna 2 Utils includes lchroot, lcluster, lpower, and slurm utilities.\
