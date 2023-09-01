@@ -17,10 +17,10 @@ __status__      = 'Development'
 
 import sys
 from builtins import dict
-import requests
 import re
 import json
 from time import sleep
+import requests
 
 CONF={}
 
