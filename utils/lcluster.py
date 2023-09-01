@@ -54,7 +54,7 @@ class LCluster():
                 self.protocol = self.get_option(configparser, 'API', 'PROTOCOL')
                 self.daemon = self.get_option(configparser, 'API', 'ENDPOINT')
                 self.security = self.get_option(configparser, 'API', 'VERIFY_CERTIFICATE')
-                self.security = True if 'y' in self.security.lower() else False
+                self.security = True if self.security.lower() in ['y', 'yes', 'true']  else False
                 if ':' in self.daemon:
                     sensu_url = self.daemon.split(':')
                     self.sensu_url = f"http://{sensu_url[0]}:3001/events"
@@ -70,7 +70,7 @@ class LCluster():
             for error in self.errors:
                 sys.stderr.write(f'{num}. {error}\n')
             sys.exit(1)
-        
+
         urllib3.disable_warnings()
 
 
@@ -123,8 +123,7 @@ class LCluster():
 
     def get_token(self):
         """
-        This method will fetch a valid token
-        for further use.
+        This method will fetch a valid token for further use.
         """
         response = False
         if os.path.isfile(TOKEN_FILE):
