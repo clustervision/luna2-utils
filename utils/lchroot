@@ -38,11 +38,15 @@ else
     echo "No config file: $LUNA_INI"
 fi
 
+API_VERIFY_CERTIFICATE=$(echo $API_VERIFY_CERTIFICATE | tr 'A-Z' 'a-z')
+if [ "$API_VERIFY_CERTIFICATE" == "false" ] || [ "$API_VERIFY_CERTIFICATE" == "no" ]; then
+	INSECURE="--insecure"
+fi
 TOKEN=""
 function get_token {
     if [ -z $TOKEN ]; then
         json='{"username":"'${API_USERNAME}'", "password":"'${API_PASSWORD}'"}'
-        response=$(curl -X POST -H "Content-Type: application/json" -d "$json" -s "${API_PROTOCOL}://${API_ENDPOINT}/token")
+        response=$(curl $INSECURE -X POST -H "Content-Type: application/json" -d "$json" -s "${API_PROTOCOL}://${API_ENDPOINT}/token")
         token=$(echo $response | awk '{ print $2 }' | grep -oE '"(\S+)"')
         TOKEN=$(echo "${token:1:-1}")
     fi
@@ -56,7 +60,7 @@ if [ "x${OSIMAGE}" = "x" ]; then
     exit 7
 fi
 token=$(get_token)
-getRet=$(curl -H "x-access-tokens: $token" -s "${API_PROTOCOL}://${API_ENDPOINT}/config/osimage/$OSIMAGE")
+getRet=$(curl $INSECURE -H "x-access-tokens: $token" -s "${API_PROTOCOL}://${API_ENDPOINT}/config/osimage/$OSIMAGE")
 #getRet=$(luna osimage show $OSIMAGE --raw | grep -vE '^(\+|\|)')
 FAKE_KERN=$(echo "$getRet" | jq --raw-output ".config.osimage.$OSIMAGE.kernelversion")
 CHROOT_PATH=$(echo "$getRet" | jq --raw-output ".config.osimage.$OSIMAGE.path")
