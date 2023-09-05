@@ -66,7 +66,7 @@ setup(
             'lslurm = utils.slurm:main',
             'limport = utils.limport:main',
             'lnode = utils.lnode:main',
-            'trix-diag = utils.trinity-diagnosis:main'
+            'trix-diag = utils.trinity_diagnosis:main'
         ]
     },
     install_requires = requirements,
