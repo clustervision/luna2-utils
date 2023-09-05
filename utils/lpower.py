@@ -236,11 +236,13 @@ def handleResults(DATA,request_id=None,subsystem=None,action=None):
                 for node in DATA[control]['failed'].keys():
                     print(f"{node}: {DATA[control]['failed'][node]}")
             if subsystem in DATA[control]:
+                if 'request_id' in DATA[control][subsystem]:
+                    request_id=str(DATA[control][subsystem]['request_id'])
                 for cat in DATA[control][subsystem].keys():
                     if cat == 'ok':
                         for node in DATA[control][subsystem][cat]:
                             print(f"{node}: {subsystem} {action}")
-                    else:
+                    elif cat != 'request_id':
                         for node in DATA[control][subsystem][cat]:
                             print(f"{node}: {cat}")
     return request_id
