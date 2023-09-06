@@ -39,7 +39,7 @@ retries = Retry(
 )
 session.mount('https://', HTTPAdapter(max_retries=retries))
 field_check = ['USERNAME', 'PASSWORD', 'ENDPOINT', 'PROTOCOL', 'VERIFY_CERTIFICATE']
-INI_FILE = '/trinity/local/luna/config/luna.ini'
+INI_FILE = '/trinity/local/luna/utils/config/luna.ini'
 CONF = {}
 
 # ============================================================================
