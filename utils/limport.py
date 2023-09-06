@@ -25,6 +25,27 @@ import requests
 from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill
 
+
+
+import requests
+from requests import Session
+from requests.adapters import HTTPAdapter
+import urllib3
+from urllib3.util import Retry
+
+
+urllib3.disable_warnings()
+session = Session()
+retries = Retry(
+    total = 60,
+    backoff_factor = 0.1,
+    status_forcelist = [502, 503, 504],
+    allowed_methods = {'GET', 'POST'}
+)
+session.mount('https://', HTTPAdapter(max_retries=retries))
+
+
+
 TOKEN_FILE = '/tmp/token.txt'
 LUNA_HOST = 'localhost'
 LUNA_PORT = 7050
@@ -60,8 +81,7 @@ def get_network_info(network_name):
         
     Returns:
         dict: The network info'''
-    resp = requests.get(
-        f'http://{LUNA_HOST}:{LUNA_PORT}/config/network/{network_name}')
+    resp = session.get(f'https://{LUNA_HOST}:{LUNA_PORT}/config/network/{network_name}', stream=True, timeout=5, verify=False)
     if resp.status_code != 200:
         return None
     else:
@@ -77,7 +97,7 @@ def get_group_info(group_name):
     Returns:
         dict: The group info
     '''
-    resp = requests.get(f'http://{LUNA_HOST}:{LUNA_PORT}/config/group/{group_name}')
+    resp = session.get(f'https://{LUNA_HOST}:{LUNA_PORT}/config/group/{group_name}', stream=True, timeout=5, verify=False)
     if resp.status_code != 200:
         return None
     else:
@@ -96,12 +116,7 @@ def add_node(nodename, nodeinfo):
     '''
 
     headers = {'x-access-tokens': get_token()}
-    resp = requests.post(
-        f'http://{LUNA_HOST}:{LUNA_PORT}/config/node/{nodename}', 
-        json={'config':{'node': {nodename: nodeinfo}}},
-        headers=headers,
-        timeout=3
-        )
+    resp = session.post(f'https://{LUNA_HOST}:{LUNA_PORT}/config/node/{nodename}', stream=True, timeout=5, verify=False,  json={'config':{'node': {nodename: nodeinfo}}}, headers=headers)
     return resp.status_code
 
 class ExcelSheet():
