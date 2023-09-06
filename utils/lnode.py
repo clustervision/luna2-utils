@@ -14,44 +14,73 @@ __email__       = 'diego.sonaglia@clustervision.com'
 __status__      = 'Development'
 
 
+import os
 import sys
 import re
 import json 
-import requests
 import fire
+from configparser import RawConfigParser
+import requests
+from requests import Session
+from requests.adapters import HTTPAdapter
+import urllib3
+from urllib3.util import Retry
+
+
+urllib3.disable_warnings()
+session = Session()
+retries = Retry(
+    total = 60,
+    backoff_factor = 0.1,
+    status_forcelist = [502, 503, 504],
+    allowed_methods = {'GET', 'POST'}
+)
+session.mount('https://', HTTPAdapter(max_retries=retries))
+field_check = ['USERNAME', 'PASSWORD', 'ENDPOINT', 'PROTOCOL', 'VERIFY_CERTIFICATE']
+INI_FILE = '/trinity/local/luna/config/luna.ini'
+CONF = {}
 
 # PENDING DIEGO 15 AUG 2023 -> need to test if sel commands on the backend work
 
-def read_ini():
+def get_option(parser=None, errors=None,  section=None, option=None):
     """
-    This method will read INI file.
+    This method will retrieve the value from the INI
     """
-    read=0
-    api = re.compile("^(\[API\])")
-    regex = re.compile("^(.[^=]+)\s+?=\s+?(.*)$")
-    CONF = {}
-    try:
-        with open("/trinity/local/luna/cli/config/luna.ini", encoding='utf-8') as f:
-            for line in f:
-                if (not read):
-                    result = api.match(line)
-                    if (result):
-                        read=1
-                else:
-                    result = regex.match(line)
-                    if (result):
-                        CONF[result.group(1)]=result.group(2)
-    except Exception as exp:
-        print("Error: /trinity/local/luna/config/cli/luna.ini Does not exist and i cannot continue.")
-        sys.exit(1)
-
-    field_check = ['USERNAME', 'PASSWORD', 'ENDPOINT', 'PROTOCOL', 'USERNAME', 'VERIFY_CERTIFICATE']
-    if not all(key in CONF for key in field_check):
-    # if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF) or ('PROTOCOL' not in CONF) or ('VERIFY_CERTIFICATE' not in CONF)):
-        print("Error: username/password/endpoint not found in config file. i cannot continue.")
-        sys.exit(2)
+    response = False
+    if parser.has_option(section, option):
+        response = parser.get(section, option)
     else:
-        CONF["VERIFY_CERTIFICATE"] = True if CONF["VERIFY_CERTIFICATE"] in ['y', 'yes', 'true']  else False
+        errors.append(f'{option} is not found in {section} section in {INI_FILE}.')
+    return response, errors
+
+
+def read_ini():
+
+    errors = []
+    username, password, daemon, secret_key, protocol, security = None, None, None, None, None, ''
+    file_check = os.path.isfile(INI_FILE)
+    read_check = os.access(INI_FILE, os.R_OK)
+    if file_check and read_check:
+        configparser = RawConfigParser()
+        configparser.read(INI_FILE)
+        if configparser.has_section('API'):
+            CONF['USERNAME'], errors = get_option(configparser, errors,  'API', 'USERNAME')
+            CONF['PASSWORD'], errors = get_option(configparser, errors,  'API', 'PASSWORD')
+            secret_key, errors = get_option(configparser, errors,  'API', 'SECRET_KEY')
+            CONF['PROTOCOL'], errors = get_option(configparser, errors,  'API', 'PROTOCOL')
+            CONF['ENDPOINT'], errors = get_option(configparser, errors,  'API', 'ENDPOINT')
+            security, errors = get_option(configparser, errors,  'API', 'VERIFY_CERTIFICATE')
+            CONF["VERIFY_CERTIFICATE"] = True if security.lower() in ['y', 'yes', 'true']  else False
+        else:
+            errors.append(f'API section is not found in {INI_FILE}.')
+    else:
+        errors.append(f'{INI_FILE} is not found on this machine.')
+    if errors:
+        sys.stderr.write('You need to fix following errors...\n')
+        num = 1
+        for error in errors:
+            sys.stderr.write(f'{num}. {error}\n')
+        sys.exit(1)
     return CONF
 # ----------------------------------------------------------------------------
 
@@ -68,7 +97,7 @@ def get_token(CONF):
     token_credentials = {'username': CONF['USERNAME'], 'password': CONF['PASSWORD']}
 
     try:
-        x = requests.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/token', json = token_credentials, timeout=5, verify=CONF["VERIFY_CERTIFICATE"])
+        x = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/token', json=token_credentials, stream=True, timeout=5, verify=CONF["VERIFY_CERTIFICATE"])
         if (str(x.status_code) in response):
             print("Error: "+response[str(x.status_code)])
             sys.exit(4)
@@ -77,6 +106,9 @@ def get_token(CONF):
             print("Error: i did not receive a token. i cannot continue.")
             sys.exit(5)
         return DATA['token']
+    except requests.exceptions.SSLError as ssl_loop_error:
+        print(f'ERROR :: {ssl_loop_error}')
+        sys.exit(3)
     except requests.exceptions.HTTPError as err:
         print("Error: trouble getting my token: "+str(err))
         sys.exit(3)
@@ -150,9 +182,9 @@ class CLI():
         valid_codes = [200, 201, 202, 204]
 
         if method == 'GET':
-            resp = requests.get(endpoint, headers=headers, timeout=5, verify=self._configs["VERIFY_CERTIFICATE"])
+            resp = session.get(endpoint, headers=headers, stream=True, timeout=5, verify=self._configs["VERIFY_CERTIFICATE"])
         elif method == 'POST':
-            resp = requests.post(endpoint, headers=headers, json=data, timeout=5, verify=self._configs["VERIFY_CERTIFICATE"])
+            resp = session.post(endpoint, headers=headers, json=data, stream=True, timeout=5, verify=self._configs["VERIFY_CERTIFICATE"])
         else:
             raise ValueError(f'Invalid method: {method}')
         if resp.status_code not in valid_codes:
@@ -167,3 +199,7 @@ def main():
     The Main method to initiate the script.
     """
     fire.Fire(CLI)
+
+
+if __name__ == "__main__":
+    main()

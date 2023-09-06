@@ -20,8 +20,11 @@ import subprocess as sp
 from threading import Timer
 from hostlist import collect_hostlist
 import requests
+from requests import Session
+from requests.adapters import HTTPAdapter
 import jwt
 import urllib3
+from urllib3.util import Retry
 from prettytable import PrettyTable
 from termcolor import colored
 import requests_unixsocket
@@ -72,6 +75,14 @@ class LCluster():
             sys.exit(1)
 
         urllib3.disable_warnings()
+        self.session = Session()
+        self.retries = Retry(
+            total= 60,
+            backoff_factor=0.1,
+            status_forcelist=[502, 503, 504],
+            allowed_methods={'GET', 'POST'},
+        )
+        self.session.mount('https://', HTTPAdapter(max_retries=self.retries))
 
 
     def get_option(self, parser=None, section=None, option=None):
@@ -101,7 +112,7 @@ class LCluster():
         data = {'username': self.username, 'password': self.password}
         daemon_url = f'{self.daemon}/token'
         try:
-            call = requests.post(url=daemon_url, json=data, timeout=5, verify=self.security)
+            call = self.session.post(url=daemon_url, json=data, stream=True, timeout=5, verify=self.security)
             if call.content:
                 data = call.json()
                 if 'token' in data:
@@ -114,6 +125,8 @@ class LCluster():
                 error = f'ERROR :: Received Nothing {self.daemon}.'
                 error = f'{error}ERROR :: HTTP Code {call.status_code}.'
                 self.exit_lcluster(error)
+        except requests.exceptions.SSLError as ssl_loop_error:
+            self.exit_lcluster(f'ERROR :: {ssl_loop_error}')
         except requests.exceptions.ConnectionError:
             self.exit_lcluster(f'ERROR :: Unable to Connect => {self.daemon}.')
         except requests.exceptions.JSONDecodeError:
@@ -253,11 +266,13 @@ class LCluster():
             if daemon:
                 headers = {'x-access-tokens': self.get_token()}
                 if payload:
-                    response = requests.post(url=url, headers=headers, json=payload, timeout=5, verify=self.security)
+                    response = self.session.post(url=url, json=payload, stream=True, headers=headers, timeout=5, verify=self.security)
                 else:
-                    response = requests.post(url=url, headers=headers, timeout=5, verify=self.security)
+                    response = self.session.post(url=url, stream=True, headers=headers, timeout=5, verify=self.security)
             else:
-                response = requests.get(url=url , timeout=5, verify=self.security)
+                response = self.session.post(url=url, stream=True, timeout=5, verify=self.security)
+        except requests.exceptions.SSLError as ssl_loop_error:
+            self.exit_lcluster(f'ERROR :: {ssl_loop_error}')
         except requests.exceptions.Timeout:
             self.exit_lcluster(f'Timeout on {url}.')
         except requests.exceptions.TooManyRedirects:
@@ -269,20 +284,20 @@ class LCluster():
 
     def get_data_real(self, url=None, daemon=False, payload=None):
         """
-        This method will make a get request and fetch the data
-        accordingly.
+        This method will make a get request and fetch the data accordingly.
         """
         try:
             if daemon:
                 headers = {'x-access-tokens': self.get_token()}
                 if payload:
-                    call = requests.get(url=url, headers=headers, json=payload, timeout=5, verify=self.security)
+                    call = self.session.get(url=url, json=payload, stream=True, headers=headers, timeout=5, verify=self.security)
                 else:
-                    call = requests.get(url=url, headers=headers, timeout=5, verify=self.security)
+                    call = self.session.get(url=url, stream=True, headers=headers, timeout=5, verify=self.security)
             else:
-                call = requests.get(url=url , timeout=5, verify=self.security)
-            # response = call.json()
+                call = self.session.get(url=url, stream=True, timeout=5, verify=self.security)
             response = call
+        except requests.exceptions.SSLError as ssl_loop_error:
+            self.exit_lcluster(f'ERROR :: {ssl_loop_error}')
         except requests.exceptions.Timeout:
             self.exit_lcluster(f'Timeout on {url}.')
             response = None
@@ -297,19 +312,20 @@ class LCluster():
 
     def get_data(self, url=None, daemon=False, payload=None):
         """
-        This method will make a get request and fetch the data
-        accordingly.
+        This method will make a get request and fetch the data accordingly.
         """
         try:
             if daemon:
                 headers = {'x-access-tokens': self.get_token()}
                 if payload:
-                    call = requests.get(url=url, headers=headers, json=payload, timeout=5, verify=self.security)
+                    call = self.session.get(url=url, json=payload, stream=True, headers=headers, timeout=5, verify=self.security)
                 else:
-                    call = requests.get(url=url, headers=headers, timeout=5, verify=self.security)
+                    call = self.session.get(url=url, stream=True, headers=headers, timeout=5, verify=self.security)
             else:
-                call = requests.get(url=url , timeout=5, verify=self.security)
+                call = self.session.get(url=url, stream=True, timeout=5, verify=self.security)
             response = call.json()
+        except requests.exceptions.SSLError as ssl_loop_error:
+            self.exit_lcluster(f'ERROR :: {ssl_loop_error}')
         except requests.exceptions.Timeout:
             self.exit_lcluster(f'Timeout on {url}.')
             response = None
@@ -324,8 +340,7 @@ class LCluster():
 
     def get_colored(self, text=None):
         """
-        This method will fetch a records from
-        the Luna 2 Daemon Database
+        This method will fetch a records from the Luna 2 Daemon Database
         """
         if text is True or text in ['PASS', 'ON']:
             text = colored(text, 'green')
