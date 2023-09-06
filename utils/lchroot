@@ -18,7 +18,7 @@ function mount_d {
     mount -t proc     proc      $CHROOT_PATH/proc 2>/dev/null || NEED_UMOUNT_PROC=0
 }
 
-export LUNA_INI='/trinity/local/luna/cli/config/luna.ini'
+export LUNA_INI='/trinity/local/luna/utils/config/luna.ini'
 
 # --------------------------------------------
 

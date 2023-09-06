@@ -30,7 +30,7 @@ from termcolor import colored
 import requests_unixsocket
 
 TOKEN_FILE = '/tmp/token.txt'
-INI_FILE = '/trinity/local/luna/config/luna.ini'
+INI_FILE = '/trinity/local/luna/utils/config/luna.ini'
 
 
 class LCluster():
