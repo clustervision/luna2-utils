@@ -15,27 +15,48 @@ __status__      = 'Development'
 
 #VERSION: 0.2.4
 
+import os
 import sys
 from builtins import dict
 import re
 import json
 from time import sleep
+from configparser import RawConfigParser
 import requests
+from requests import Session
+from requests.adapters import HTTPAdapter
+import urllib3
+from urllib3.util import Retry
 
-CONF={}
+
+urllib3.disable_warnings()
+session = Session()
+retries = Retry(
+    total = 60,
+    backoff_factor = 0.1,
+    status_forcelist = [502, 503, 504],
+    allowed_methods = {'GET', 'POST'}
+)
+session.mount('https://', HTTPAdapter(max_retries=retries))
+field_check = ['USERNAME', 'PASSWORD', 'ENDPOINT', 'PROTOCOL', 'VERIFY_CERTIFICATE']
+INI_FILE = '/trinity/local/luna/config/luna.ini'
+CONF = {}
 
 # ============================================================================
 
 def main(argv):
-    NODES=None
-    GROUPS=None
-    INTERFACES=None
-    ACTION=None
-    SUBSYSTEM=None
+    """
+    The main method to initiate the script.
+    """
+    NODES = None
+    GROUPS = None
+    INTERFACES = None
+    ACTION = None
+    SUBSYSTEM = None
     for i in range(0, len(argv)):
         if (argv[i] == "-h" or argv[i] == "--help"):
-            callHelp()
-            exit()
+            call_help()
+            sys.exit()
         elif (argv[i] == "-g" or argv[i] == "--groups"):
             i+=1
             GROUPS=argv[i]
@@ -49,22 +70,25 @@ def main(argv):
             SUBSYSTEM='chassis'
         else:
             print("Error: Invalid options used.")
-            callHelp()
-            exit()
+            call_help()
+            sys.exit()
     if (len(argv) == 0):
-        callHelp()
-        exit()
+        call_help()
+        sys.exit()
     if ((NODES is None) or (ACTION is None)):
         print("Error: Instruction incomplete. Nodes and Task expected.")
-        callHelp()
-        exit()
+        call_help()
+        sys.exit()
     handleRequest(nodes=NODES,groups=GROUPS,subsystem=SUBSYSTEM,action=ACTION)
-    exit()
+    sys.exit()
 
 # ============================================================================
 
-def callHelp():
-    print ("""
+def call_help():
+    """
+    This method will provide a Help Menu.
+    """
+    print("""
 usage: lpower [-h] [--interface INTERFACE]
               [hosts] {status,on,off,reset,cycle,identify,noidentify}
 
@@ -83,58 +107,81 @@ optional arguments:
 
 
 # ----------------------------------------------------------------------------
+def get_option(parser=None, errors=None,  section=None, option=None):
+    """
+    This method will retrieve the value from the INI
+    """
+    response = False
+    if parser.has_option(section, option):
+        response = parser.get(section, option)
+    else:
+        errors.append(f'{option} is not found in {section} section in {INI_FILE}.')
+    return response, errors
 
-def readConfigFile():
-    read=0
-    api = re.compile("^(\[API\])")
-    regex = re.compile("^(.[^=]+)\s+?=\s+?(.*)$")
-    try:
-        with open("/trinity/local/luna/cli/config/luna.ini") as f:
-            for line in f:
-                if (not read):
-                    result = api.match(line)
-                    if (result):
-                        read=1
-                else:
-                    result = regex.match(line)
-                    if (result):
-                        CONF[result.group(1)]=result.group(2)
-    except:
-        print("Error: /trinity/local/luna/cli/config/luna.ini Does not exist and i cannot continue.")
-        exit(1)
 
-    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF) or ('PROTOCOL' not in CONF)):
-        print("Error: username/password/endpoint not found in config file. i cannot continue.")
-        exit(2)
+def read_ini():
+
+    errors = []
+    username, password, daemon, secret_key, protocol, security = None, None, None, None, None, ''
+    file_check = os.path.isfile(INI_FILE)
+    read_check = os.access(INI_FILE, os.R_OK)
+    if file_check and read_check:
+        configparser = RawConfigParser()
+        configparser.read(INI_FILE)
+        if configparser.has_section('API'):
+            CONF['USERNAME'], errors = get_option(configparser, errors,  'API', 'USERNAME')
+            CONF['PASSWORD'], errors = get_option(configparser, errors,  'API', 'PASSWORD')
+            secret_key, errors = get_option(configparser, errors,  'API', 'SECRET_KEY')
+            CONF['PROTOCOL'], errors = get_option(configparser, errors,  'API', 'PROTOCOL')
+            CONF['ENDPOINT'], errors = get_option(configparser, errors,  'API', 'ENDPOINT')
+            security, errors = get_option(configparser, errors,  'API', 'VERIFY_CERTIFICATE')
+            CONF["VERIFY_CERTIFICATE"] = True if security.lower() in ['y', 'yes', 'true']  else False
+        else:
+            errors.append(f'API section is not found in {INI_FILE}.')
+    else:
+        errors.append(f'{INI_FILE} is not found on this machine.')
+    if errors:
+        sys.stderr.write('You need to fix following errors...\n')
+        num = 1
+        for error in errors:
+            sys.stderr.write(f'{num}. {error}\n')
+        sys.exit(1)
+    return CONF
 
 # ----------------------------------------------------------------------------
 
 def getToken():
-    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF) or ('PROTOCOL' not in CONF)):
-        readConfigFile()
+    """
+    This method will retrieve the token.
+    """
+    if not all(key in CONF for key in field_check):
+        read_ini()
 
-    RET={'401': 'invalid credentials', '400': 'bad request'}
+    RET = {'401': 'invalid credentials', '400': 'bad request'}
 
-    token_credentials = {'username': CONF['USERNAME'],'password': CONF['PASSWORD']}
+    token_credentials = {'username': CONF['USERNAME'], 'password': CONF['PASSWORD']}
     try:
-        x = requests.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/token', json = token_credentials)
+        x = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/token', json=token_credentials, stream=True, timeout=5, verify=CONF["VERIFY_CERTIFICATE"])
         if (str(x.status_code) in RET):
             print("Error: "+RET[str(x.status_code)])
-            exit(4)
-        DATA=json.loads(x.text)
+            sys.exit(4)
+        DATA = json.loads(x.text)
         if (not 'token' in DATA):
             print("Error: i did not receive a token. i cannot continue.")
-            exit(5)
+            sys.exit(5)
         CONF["TOKEN"]=DATA["token"]
+    except requests.exceptions.SSLError as ssl_loop_error:
+        print(f'ERROR :: {ssl_loop_error}')
+        sys.exit(3)
     except requests.exceptions.HTTPError as err:
         print("Error: trouble getting my token: "+str(err))
-        exit(3)
+        sys.exit(3)
     except requests.exceptions.ConnectionError as err:
         print("Error: trouble getting my token: "+str(err))
-        exit(3)
+        sys.exit(3)
     except requests.exceptions.Timeout as err:
         print("Error: trouble getting my token: "+str(err))
-        exit(3)
+        sys.exit(3)
 #    Below commented out as this catch all will also catch legit responses for e.g. 401 and 404
 #    except:
 #        print("Error: trouble getting my token for unknown reasons.")
@@ -143,14 +190,14 @@ def getToken():
 
 # ----------------------------------------------------------------------------
 
-def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=None):
+def handleRequest(nodes=None ,groups=None, interface=None, subsystem=None, action=None):
     if ((not nodes is None) and (not action is None)):
         if ('TOKEN' not in CONF):
             getToken()
         if ('ENDPOINT' not in CONF):
-            readConfigFile()
+            read_ini()
 
-        RET={'400': 'invalid request', '404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
+        RET = {'400': 'invalid request', '404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
 
         headers = {'x-access-tokens': CONF['TOKEN']}
 
@@ -161,7 +208,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
         # single node query we do with GET
         if (result and nodes == result.group(1)):
             try:
-                r = requests.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}',headers=headers)
+                r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}', stream=True, headers=headers, timeout=5, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
                 if (r.text):
                     DATA=json.loads(r.text)
@@ -170,10 +217,13 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
                 elif (status_code in RET):
                     print(nodes+": failed: "+RET[status_code])
                 elif('control' in DATA):
-                    print(nodes+": "+str(DATA['control']['status'] or 'no results returned'))
+                    print(nodes+": "+str(DATA['control']['power'] or 'no results returned'))
                 else:
                     # when we don't know how to handle the returned data
                     print("["+status_code+'] ::: '+r.text)
+            except requests.exceptions.SSLError as ssl_loop_error:
+                print(f'ERROR :: {ssl_loop_error}')
+                sys.exit(3)
             except requests.exceptions.HTTPError as err:
                 print("Error: trouble getting results: "+str(err))
                 exit(3)
@@ -187,7 +237,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
         else:
             try:
                 body = {'control': { subsystem: { action: { 'hostlist': nodes } } } }
-                r = requests.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', json=body, headers=headers)
+                r = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', stream=True, headers=headers, json=body, timeout=5, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
                 if (status_code in RET):
                     print(nodes+": failed: "+RET[status_code])
@@ -197,7 +247,7 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
                     # ------------- loop to keep polling for updates. -----------------------------------------------
                     while r.status_code == 200:
                         sleep(2)
-                        r = requests.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/status/{request_id}',headers=headers)
+                        r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/status/{request_id}', stream=True, headers=headers, timeout=5, verify=CONF["VERIFY_CERTIFICATE"])
                         status_code=str(r.status_code)
                         if (r.status_code!=200):
                             return
@@ -209,6 +259,9 @@ def handleRequest(nodes=None,groups=None,interface=None,subsystem=None,action=No
                 else:
                     # when we don't know how to handle the returned data
                     print(status_code+' ::: '+r.text)
+            except requests.exceptions.SSLError as ssl_loop_error:
+                print(f'ERROR :: {ssl_loop_error}')
+                sys.exit(3)
             except requests.exceptions.HTTPError as err:
                 print("Error: trouble getting results: "+str(err))
                 exit(3)
@@ -236,11 +289,13 @@ def handleResults(DATA,request_id=None,subsystem=None,action=None):
                 for node in DATA[control]['failed'].keys():
                     print(f"{node}: {DATA[control]['failed'][node]}")
             if subsystem in DATA[control]:
+                if 'request_id' in DATA[control][subsystem]:
+                    request_id=str(DATA[control][subsystem]['request_id'])
                 for cat in DATA[control][subsystem].keys():
                     if cat == 'ok':
                         for node in DATA[control][subsystem][cat]:
                             print(f"{node}: {subsystem} {action}")
-                    else:
+                    elif cat != 'request_id':
                         for node in DATA[control][subsystem][cat]:
                             print(f"{node}: {cat}")
     return request_id
@@ -249,5 +304,3 @@ def handleResults(DATA,request_id=None,subsystem=None,action=None):
 
 # hidden at the bottom; the call for the main function...
 main(sys.argv[1:])
-
-
