@@ -110,7 +110,7 @@ def main():
     """
     response = {
         "Trinity Core": {"chronyd": None, "named": None, "dhcpd": None, "mariadb": None, "nfs-server": None, "nginx": None},
-        "Luna": {"luna2-daemon": None, "ltorrent": None},
+        "Luna": {"luna2-daemon": None, "transmission-daemon": None},
         "LDAP": {"slapd": None, "sssd": None, "nslcd": None, },
         "Slurm": {"slurmctld": None, },
         "Monitoring core": {"influxdb": None, "telegraf": None, "grafana-server": None, "sensu-server": None, "sensu-api": None, "rabbitmq-server": None},
