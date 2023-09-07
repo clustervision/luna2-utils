@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/trinity/local/python/bin/python3
 import sys
 import os
 import base64
