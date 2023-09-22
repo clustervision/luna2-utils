@@ -213,7 +213,7 @@ class Slurm():
         
         try:
             file_path = os.path.realpath(__file__)
-            file_path = file_path.replace("slurm.py", "lsinfo.py")
+            file_path = file_path.replace("lslurm.py", "lsinfo.py")
             proc = sp.Popen(f"python3 {file_path}", shell=True, stdout=sp.PIPE, stderr=sp.PIPE)
             timer = Timer(10, lambda p: p.kill(), [proc])
             try:
