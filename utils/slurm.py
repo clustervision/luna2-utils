@@ -1,4 +1,3 @@
-#!/trinity/local/python/bin/python3
 # # -*- coding: utf-8 -*-
 
 """
@@ -16,6 +15,8 @@ __status__      = "Development"
 from configparser import RawConfigParser
 import os
 import sys
+import subprocess as sp
+from threading import Timer
 from datetime import datetime
 import requests
 import requests_unixsocket
@@ -195,8 +196,38 @@ class Slurm():
                 response = session.get(f'{self.socket_cmd}{api}')
             response = response.json()
         except Exception as exp:
+            self.run_sinfo()
+            sys.exit(0)
             sys.stderr.write(f"UNIX SOCKET Exception while calling Slurm {exp}\n")
+            sys.stderr.write(f"Slurm  is running by sinfo {exp}\n")
         return response
+
+
+
+    def run_sinfo(self):
+        """
+        Returns 'return_code', 'stdout', 'stderr', 'exception'
+        Where 'exception' is a content of Python exception if any
+        """
+        
+        try:
+            file_path = os.path.realpath(__file__)
+            file_path = file_path.replace("slurm.py", "lsinfo.py")
+            proc = sp.Popen(f"python3 {file_path}", shell=True, stdout=sp.PIPE, stderr=sp.PIPE)
+            timer = Timer(10, lambda p: p.kill(), [proc])
+            try:
+                timer.start()
+                stdout, stderr = proc.communicate()
+                stdout = stdout.decode('ascii')
+                print(stdout)
+            except sp.TimeoutExpired as exp:
+                print(f"Subprocess Timeout executing {exp}")
+            finally:
+                timer.cancel()
+            proc.wait()
+        except sp.SubprocessError as exp:
+            print(f"Subprocess Error executing {cmd} Exception is {exp}")
+        return True
 
 
     def post_statistics(self):
@@ -255,3 +286,4 @@ if __name__ == "__main__":
     else:
         sys.stderr.write(f'Not able to find statistics with Slurm Version {slurm.slurm_version}\n')
         sys.exit(1)
+
