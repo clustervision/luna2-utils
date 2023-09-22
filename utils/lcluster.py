@@ -208,18 +208,21 @@ class LCluster():
             ipmi_response = self.post_data(ipmi_url, True, payload)
             if ipmi_response.status_code == 200:
                 http_response = ipmi_response.json()
-                request_id = http_response['control']['request_id']
+                if 'request_id' in http_response:
+                    request_id = http_response['request_id']
                 ipmi_status_url = f'{self.daemon}/control/status/{request_id}'
-
                 for node in nodes:
-                    if node in http_response['control']['failed'].keys():
-                        response[node] = http_response['control']['failed'][node]
-                    elif node in http_response['control']['power']['off'].keys():
-                        response[node] = 'OFF'
-                    elif node in http_response['control']['power']['on'].keys():
-                        response[node] = 'ON'
-                    elif node in http_response['control']['power']['ok'].keys():
-                        response[node] = 'ON'
+                    if 'failed' in http_response['control']:
+                        if node in http_response['control']['failed'].keys():
+                            response[node] = http_response['control']['failed'][node]
+                        elif node in http_response['control']['power']['off'].keys():
+                            response[node] = 'OFF'
+                        elif node in http_response['control']['power']['on'].keys():
+                            response[node] = 'ON'
+                        elif node in http_response['control']['power']['ok'].keys():
+                            response[node] = 'ON'
+                        else:
+                            response[node] = None
                     else:
                         response[node] = None
 
@@ -242,7 +245,7 @@ class LCluster():
                                     response[node] = None
                             return get_status_ipmi(ipmi_status_url, response)
                         else:
-                            return response
+                            return get_status_ipmi(ipmi_status_url, response)
                     elif ipmi_status_response.status_code == 404:
                         return response
                     else:
