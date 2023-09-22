@@ -1,4 +1,5 @@
-# # -*- coding: utf-8 -*-
+#!/trinity/local/python/bin/python3
+# -*- coding: utf-8 -*-
 
 """
 Slurm Utility for Trinity Project
