@@ -280,11 +280,11 @@ def handleResults(DATA,request_id=None,subsystem=None,action=None):
     request_id=0
     if (type(DATA) is dict):
 #        print(f"DEBUG: {DATA} {subsystem} {action}")
+        if 'request_id' in DATA:
+            request_id=str(DATA['request_id'])
         for control in DATA.keys():
             if 'request_id' in DATA[control]:
                 request_id=str(DATA[control]['request_id'])
-                #print(f"Request_id: [{request_id}]")
-                #next
             if 'failed' in DATA[control]:
                 for node in DATA[control]['failed'].keys():
                     print(f"{node}: {DATA[control]['failed'][node]}")
