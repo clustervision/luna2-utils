@@ -8,52 +8,18 @@ import datetime
 import platform
 import pprint
 import requests
+import json
 
 checktime = datetime.datetime.now().strftime("%s")
 tagline = "hostname={}".format(os.uname().nodename)
 lineprotocol = ""
 url = "http://localhost:8086/write?db=slurm&precision=s"
 
-
-# Squeue
-# A (JobID), P (Partition), j (Jobname), u (Username)
-# t (Job state), r (Reason), %C (CPUs requested or allocated)
-# Mandatory: print the header, this is the field name.
-
-# Sinfo
-# %C Allocated / idle / other / total
-# Transitioning from 6 allocated + 4 idle -> 10.
-
-# 190001 11:30:48 [root@trixdev04 ~]# sinfo -o %C
-# CPUS(A/I/O/T)
-# 6/4/0/10
-# 190001 11:30:50 [root@trixdev04 ~]# sinfo -o %C
-# CPUS(A/I/O/T)
-# 10/0/0/10
-
-# Sinfo
-# %F
-# sinfo -o %F
-# NODES(A/I/O/T)
-# 4/0/0/4
-
-# Sdiag
-# No options.
-
 slurm_output = {}
-
-
 commandlist = {
-    "squeue": 'squeue -h -a -r -o %P,%A,%j,%u,%t,%C --states=all',
-    "sinfo_cpus": 'sinfo -h -o %C',
-    "sinfo_nodes": 'sinfo -h -o %F',
-    "sdiag": 'sdiag'
-
+    'resources': 'sinfo --all --long --json',
+    'jobs': 'squeue -i 60 --all --long --json'
 }
-
-def process_sdiag(checkcommand,output):
-    print(type(output))
-    print(output)
 
 def exec_slurm(checkcommand,checkname):
     try:
@@ -65,85 +31,102 @@ def exec_slurm(checkcommand,checkname):
 
 
 # Loop through the commands. Then update the dictionary as 'command' -> 'output'
-
 for checkname, checkcommand in commandlist.items():
     process_output = exec_slurm(checkcommand,checkname)
     slurm_output.update([process_output])
 
 # Loop through command and process the output.
 for check, output in slurm_output.items():
-    if check == "sdiag":
-        for line in output.split('\n'):
-            if "Jobs pending" in line:
-                jobs_pending = line.split(':')[1].lstrip(' ')
-            if "Jobs running" in line:
-                jobs_running = line.split(':')[1].lstrip(' ')
-        lineprotocol += "sdiag,{} jobs_pending={},jobs_running={} {}\n".format(tagline,jobs_pending,jobs_running,checktime)
-    if check == "sinfo_cpus":
-        cpu_a, cpu_i, cpu_o, cpu_t = output.rstrip('\n').split('/')
-        lineprotocol += "sinfo_cpus,{} cpu_allocated={},cpu_idle={},cpu_other={},cpu_total={} {}\n".format(tagline, cpu_a, cpu_i, cpu_o, cpu_t, checktime)
-    if check == "sinfo_nodes":
-        node_a, node_i, node_o, node_t = output.rstrip('\n').split('/')
-        lineprotocol += "sinfo_nodes,{} nodes_allocated={},nodes_idle={},nodes_other={},nodes_total={} {}\n".format(tagline, node_a, node_i, node_o, node_t, checktime)
-    if check == "squeue":
-        slurm_partition = {}
-        partition_id = 0
-        for line in output.split('\n'):
-             if line:
-                 part,jobid,jobname,user,state,cpus = line.split(',')
-             else:
-                 # Invalid line or incomplete line
-                 break
 
-             if not part in slurm_partition:
-                 # A new partition encountered, set all metrics
-                 slurm_partition[part] = {}
-                 slurm_partition[part]["running"] = 0
-                 slurm_partition[part]["pending"] = 0
-                 slurm_partition[part]["suspended"] = 0
-                 slurm_partition[part]["cancelled"] = 0
-                 slurm_partition[part]["completing"] = 0
-                 slurm_partition[part]["completed"] = 0
-                 slurm_partition[part]["configuring"] = 0
-                 slurm_partition[part]["failed"] = 0
-                 slurm_partition[part]["timeout"] = 0
-                 slurm_partition[part]["preempted"] = 0
-                 slurm_partition[part]["node_fail"] = 0
+    if check == "jobs":
+        jobs = []
+        output_dict = json.loads(output)
 
-             if state == "R":
-                 slurm_partition[part]["running"] += 1
-             if state == "PD":
-                 slurm_partition[part]["pending"] += 1
-             if state == "S":
-                 slurm_partition[part]["suspended"] += 1
-             if state == "CA":
-                 slurm_partition[part]["cancelled"] += 1
-             if state == "CD":
-                 slurm_partition[part]["completed"] += 1
-             if state == "CG":
-                 slurm_partition[part]["completing"] += 1
-             if state == "CF":
-                 slurm_partition[part]["configuring"] += 1
-             if state == "F":
-                 slurm_partition[part]["failed"] += 1
-             if state == "TO":
-                 slurm_partition[part]["timeout"] += 1
-             if state == "PR":
-                 slurm_partition[part]["preempted"] += 1
-             if state == "NF":
-                 slurm_partition[part]["node_fail"] += 1
+        possible_job_states = ["RUNNING", "PENDING", "SUSPENDED", "COMPLETING", "COMPLETED", "CONFIGURING", "CANCELLED", "FAILED" ]
+        for output_dict_job in output_dict.get('jobs', []):
 
-        for partition in slurm_partition.items():
-            queuename = partition[0]
-            kev = ''
-            for key,value in partition[1].items():
-                kev += "{}={},".format(key,value)
-            lineprotocol += "squeue,{},part={} {} {}\n".format(tagline, queuename, kev.rstrip(','), checktime)
+            # states = {k.lower():0 for k in possible_job_states}
+            state = output_dict_job["job_state"]
+            if state not in possible_job_states:
+                state = "UNKNOWN"
+            state = state.lower()
 
+            job = {}
+            job["job_id"] = output_dict_job["job_id"]
+            job["partition"] = output_dict_job["partition"]
+            job["state"] = state
+            jobs.append(job)
+
+        for job in jobs:
+            tag_keys = {"partition": lambda x: f'"{x}"', "job_id":  lambda x: f'"{x}"', "state":  lambda x: f'"{x}"'}
+            value_keys = {}
+            tags, values = "", ""
+            
+            for k, v in job.items():
+                if k in tag_keys:
+                    tags += "{}={},".format(k, v)
+                    values += "_{}={},".format(k, tag_keys[k](v))
+                elif k in value_keys:
+                    values += "{}={},".format(k, value_keys[k](v))
+                else:
+                    raise Exception("Unknown key: {}".format(k))
+
+            tags = tags.rstrip(",")
+            values = values.rstrip(",")
+
+            line = "{},{} {} {}\n".format(check, tags, values, checktime)
+            lineprotocol += line
+
+        # job states are 
+    if check == "resources":
+        nodes = []
+        # node states are allocated, completing, down, drained, draining, fail, failing, future, idle, maint, mixed, perfctrs, planned, power_down, power_up, reserved, and unknown
+        possible_node_states = ["allocated", "fail", "idle", "mixed", "planned", "power_down", "power_up", "reserved", ]
+        
+        output_dict = json.loads(output)
+       
+        for output_dict_node in output_dict.get('nodes', []):
+            output_dict_node_partitions = output_dict_node["partitions"]
+            for output_dict_node_partition in output_dict_node_partitions:
+                state = output_dict_node["state"]
+                if state not in possible_node_states:
+                    state = "unknown"
+
+                node = {}
+                node["partition"] = output_dict_node_partition
+                node["hostname"] = output_dict_node["hostname"]
+                node["cpus"] = output_dict_node["cpus"]
+                node["alloc_cpus"] = output_dict_node["alloc_cpus"]
+                node["memory"] = output_dict_node["real_memory"]
+                node["alloc_memory"] = output_dict_node["alloc_memory"]
+                node["state"] = state
+                nodes.append(node)
+
+        for node in nodes:
+            tag_keys = {"partition": lambda x: f'"{x}"', "hostname":  lambda x: f'"{x}"', "state":  lambda x: f'"{x}"'}
+            value_keys = {"cpus": lambda x: int(x), "alloc_cpus": lambda x: int(x), "memory": lambda x: int(x), "alloc_memory": lambda x: int(x)}
+            tags, values = "", ""
+
+            for k, v in node.items():
+                if k in tag_keys:
+                    tags += "{}={},".format(k, v)
+                    values += "_{}={},".format(k, tag_keys[k](v))
+                elif k in value_keys:
+                    values += "{}={},".format(k, value_keys[k](v))
+                else:
+                    raise Exception("Unknown key: {}".format(k))
+            
+            tags = tags.rstrip(",")
+            values = values.rstrip(",")
+
+            line = "{},{} {} {}\n".format(check, tags, values, checktime)
+            lineprotocol += line
+
+print("start")
+print(lineprotocol)
 if lineprotocol:
-     try:
+    try:
          r = requests.post(url, data=lineprotocol)
-         print(r.status_code)
-     except requests.exceptions.ConnectionError:
-         print("Database seems offline")
-     print(lineprotocol)
+    except requests.exceptions.ConnectionError:
+        print("Database seems offline")
+#  s
