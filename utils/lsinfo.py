@@ -18,7 +18,7 @@ url = "http://localhost:8086/write?db=slurm&precision=s"
 slurm_output = {}
 commandlist = {
     'resources': 'sinfo --all --long --json',
-    'jobs': 'squeue -i 60 --all --long --json'
+    'jobs': 'squeue --all --long --json'
 }
 
 def exec_slurm(checkcommand,checkname):
