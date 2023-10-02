@@ -29,7 +29,7 @@ from prettytable import PrettyTable
 from termcolor import colored
 import requests_unixsocket
 
-TOKEN_FILE = '/tmp/token.txt'
+TOKEN_FILE = '/trinity/local/luna/utils/config/token.txt'
 INI_FILE = '/trinity/local/luna/utils/config/luna.ini'
 
 

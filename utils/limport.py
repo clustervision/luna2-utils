@@ -46,7 +46,7 @@ session.mount('https://', HTTPAdapter(max_retries=retries))
 
 
 
-TOKEN_FILE = '/tmp/token.txt'
+TOKEN_FILE = '/trinity/local/luna/utils/config/token.txt'
 LUNA_HOST = 'localhost'
 LUNA_PORT = 7050
 
@@ -64,7 +64,7 @@ def print_fatal(msg):
 
 def get_token():
     '''
-    Reads the token from /tmp/token.txt
+    Reads the token from /trinity/local/luna/utils/config/token.txt
 
     Returns:
         str: The token
