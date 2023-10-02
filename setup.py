@@ -63,7 +63,7 @@ setup(
             'lchroot = utils.bash_runner:lchroot',
             'lpower = utils.lpower:main',
             'lcluster = utils.lcluster:main',
-            'lslurm = utils.slurm:main',
+            'lslurm = utils.lslurm:main',
             'limport = utils.limport:main',
             'lnode = utils.lnode:main',
             'trix-diag = utils.trinity_diagnosis:main'
