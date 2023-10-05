@@ -60,7 +60,12 @@ class LCluster():
         Default variables should be here before calling the any method.
         """
         self.errors = []
-        self.username, self.password, self.daemon, self.secret_key, self.protocol, self.security = None, None, None, None, None, ''
+        self.username = None
+        self.password = None
+        self.daemon = None
+        self.secret_key = None
+        self.protocol = None
+        self.security = ''
         self.table = PrettyTable()
         file_check = os.path.isfile(INI_FILE)
         read_check = os.access(INI_FILE, os.R_OK)
@@ -129,7 +134,13 @@ class LCluster():
         data = {'username': self.username, 'password': self.password}
         daemon_url = f'{self.daemon}/token'
         try:
-            call = self.session.post(url=daemon_url, json=data, stream=True, timeout=5, verify=self.security)
+            call = self.session.post(
+                url=daemon_url,
+                json=data,
+                stream=True,
+                timeout=5,
+                verify=self.security
+            )
             if call.content:
                 data = call.json()
                 if 'token' in data:
@@ -286,9 +297,22 @@ class LCluster():
             if daemon:
                 headers = {'x-access-tokens': self.get_token()}
                 if payload:
-                    response = self.session.post(url=url, json=payload, stream=True, headers=headers, timeout=5, verify=self.security)
+                    response = self.session.post(
+                        url=url,
+                        json=payload,
+                        stream=True,
+                        headers=headers,
+                        timeout=5,
+                        verify=self.security
+                    )
                 else:
-                    response = self.session.post(url=url, stream=True, headers=headers, timeout=5, verify=self.security)
+                    response = self.session.post(
+                        url=url,
+                        stream=True,
+                        headers=headers,
+                        timeout=5,
+                        verify=self.security
+                    )
             else:
                 response = self.session.post(url=url, stream=True, timeout=5, verify=self.security)
         except requests.exceptions.SSLError as ssl_loop_error:
@@ -310,9 +334,22 @@ class LCluster():
             if daemon:
                 headers = {'x-access-tokens': self.get_token()}
                 if payload:
-                    call = self.session.get(url=url, json=payload, stream=True, headers=headers, timeout=5, verify=self.security)
+                    call = self.session.get(
+                        url=url,
+                        json=payload,
+                        stream=True,
+                        headers=headers,
+                        timeout=5,
+                        verify=self.security
+                    )
                 else:
-                    call = self.session.get(url=url, stream=True, headers=headers, timeout=5, verify=self.security)
+                    call = self.session.get(
+                        url=url,
+                        stream=True,
+                        headers=headers,
+                        timeout=5,
+                        verify=self.security
+                    )
             else:
                 call = self.session.get(url=url, stream=True, timeout=5, verify=self.security)
             response = call
@@ -338,9 +375,22 @@ class LCluster():
             if daemon:
                 headers = {'x-access-tokens': self.get_token()}
                 if payload:
-                    call = self.session.get(url=url, json=payload, stream=True, headers=headers, timeout=5, verify=self.security)
+                    call = self.session.get(
+                        url=url,
+                        json=payload,
+                        stream=True,
+                        headers=headers,
+                        timeout=5,
+                        verify=self.security
+                    )
                 else:
-                    call = self.session.get(url=url, stream=True, headers=headers, timeout=5, verify=self.security)
+                    call = self.session.get(
+                        url=url,
+                        stream=True,
+                        headers=headers,
+                        timeout=5,
+                        verify=self.security
+                    )
             else:
                 call = self.session.get(url=url, stream=True, timeout=5, verify=self.security)
             response = call.json()
@@ -494,7 +544,12 @@ class LCluster():
             print(f"UNIX SOCKET Exception while calling Slurm {exp}")
             try:
                 headers = {'X-SLURM-USER-NAME': 'USERNAME', 'X-SLURM-USER-TOKEN': 'TOKEN'}
-                call_slurm = requests.get(url=self.slurm_url, headers=headers, timeout=5, verify=self.security)
+                call_slurm = requests.get(
+                    url=self.slurm_url,
+                    headers=headers,
+                    timeout=5,
+                    verify=self.security
+                )
                 slurm_response = call_slurm.json()
             except requests.exceptions.Timeout:
                 print(f'Timeout on {self.slurm_url}.')

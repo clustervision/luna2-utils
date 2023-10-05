@@ -6,3 +6,4 @@ include utils/lchroot
 include utils/bootutil.tclsh
 include utils/slurm.ini
 include utils/*VERSION.txt
+include data/limport/nodes.xlsx
