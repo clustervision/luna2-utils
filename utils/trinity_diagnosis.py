@@ -1,6 +1,24 @@
 #!/trinity/local/python/bin/python3
 # -*- coding: utf-8 -*-
 
+# This code is part of the TrinityX software suite
+# Copyright (C) 2023  ClusterVision Solutions b.v.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>
+
+
+
 """
 Trinity Diagnosis Utility to check the status of all service and modules.
 """
@@ -110,8 +128,8 @@ def main():
     """
     response = {
         "Trinity Core": {"chronyd": None, "named": None, "dhcpd": None, "mariadb": None, "nfs-server": None, "nginx": None},
-        "Luna": {"luna2-daemon": None, "transmission-daemon": None},
-        "LDAP": {"slapd": None, "sssd": None, "nslcd": None, },
+        "Luna": {"luna2-daemon": None, "aria2c": None},
+        "LDAP": {"slapd": None, "sssd": None},
         "Slurm": {"slurmctld": None, },
         "Monitoring core": {"influxdb": None, "telegraf": None, "grafana-server": None, "sensu-server": None, "sensu-api": None, "rabbitmq-server": None},
         "Trinity OOD": {"httpd": None}
@@ -121,7 +139,7 @@ def main():
         for service, val in value.items():
             response[key][service] = Diagnosis().trinity_status(f"systemctl status {service}.service | grep Active:")
     for key, value in response.items():
-        print(colored(key, 'white', attrs=['bold']))
+        print(colored(key, 'grey', attrs=['bold']))
         for service, val in value.items():
             print(f'\t{service}: {val}')
         print('\n')

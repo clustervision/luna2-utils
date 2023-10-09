@@ -1,6 +1,23 @@
 #!/trinity/local/python/bin/python3
 # -*- coding: utf-8 -*-
 
+# This code is part of the TrinityX software suite
+# Copyright (C) 2023  ClusterVision Solutions b.v.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>
+
+
 """
 Slurm Utility for Trinity Project
 """
@@ -164,7 +181,8 @@ class Slurm():
 
                 node_data = f'nodes_allocated={nodes_allocated},nodes_idle={nodes_idle},'
                 node_data += f'nodes_other={nodes_other},nodes_total={nodes_total}'
-                self.line_protocol += f'sinfo_nodes,{self.hostname} {node_data} {self.request_time}\n'
+                self.line_protocol += f'sinfo_nodes,{self.hostname} {node_data}'
+                self.line_protocol += f' {self.request_time}\n'
         return self.line_protocol
 
 
@@ -210,7 +228,6 @@ class Slurm():
         Returns 'return_code', 'stdout', 'stderr', 'exception'
         Where 'exception' is a content of Python exception if any
         """
-        
         try:
             file_path = os.path.realpath(__file__)
             file_path = file_path.replace("lslurm.py", "lsinfo.py")
@@ -220,6 +237,7 @@ class Slurm():
                 timer.start()
                 stdout, stderr = proc.communicate()
                 stdout = stdout.decode('ascii')
+                stderr = stderr.decode('ascii')
                 print(stdout)
             except sp.TimeoutExpired as exp:
                 print(f"Subprocess Timeout executing {exp}")
@@ -227,7 +245,7 @@ class Slurm():
                 timer.cancel()
             proc.wait()
         except sp.SubprocessError as exp:
-            print(f"Subprocess Error executing {cmd} Exception is {exp}")
+            print(f"Subprocess Error executing {file_path} Exception is {exp}")
         return True
 
 
@@ -254,20 +272,20 @@ def main():
     """
     This main method will initiate the script for pip installation.
     """
-    slurm = Slurm()
-    STATISTICS = slurm.get_statistics()
-    if STATISTICS:
-        RESPONSE = slurm.post_statistics()
-        if RESPONSE:
-            sys.stdout.write(RESPONSE)
+    slurm_call = Slurm()
+    statistics = slurm_call.get_statistics()
+    if statistics:
+        response = slurm_call.post_statistics()
+        if response:
+            sys.stdout.write(response)
             sys.exit(0)
         else:
-            sys.stderr.write(f'Unable to POST on :: {slurm.workload_url}\n')
+            sys.stderr.write(f'Unable to POST on :: {slurm_call.workload_url}\n')
             sys.stderr.write('POST PAYLOAD --->>\n')
-            sys.stderr.write(f'{slurm.line_protocol}\n')
+            sys.stderr.write(f'{slurm_call.line_protocol}\n')
             sys.exit(1)
     else:
-        sys.stderr.write(f'Not able to find statistics with Slurm Version {slurm.slurm_version}\n')
+        sys.stderr.write(f'Not get any statistics with Slurm Version {slurm_call.slurm_version}\n')
         sys.exit(1)
 
 
@@ -285,6 +303,5 @@ if __name__ == "__main__":
             sys.stderr.write(f'{slurm.line_protocol}\n')
             sys.exit(1)
     else:
-        sys.stderr.write(f'Not able to find statistics with Slurm Version {slurm.slurm_version}\n')
+        sys.stderr.write(f'Not get any statistics with Slurm Version {slurm.slurm_version}\n')
         sys.exit(1)
-
