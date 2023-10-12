@@ -40,10 +40,11 @@ def _run(bash_script):
     """
     return subprocess.call(bash_script, shell=True)
 
+
 def lchroot():
     """
     This method will pass the path of lchroot for pip installation.
     """
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    lchroot = f'sh {dir_path}/lchroot'
-    return _run(lchroot)
+    response = f'sh {dir_path}/lchroot'
+    return _run(response)
