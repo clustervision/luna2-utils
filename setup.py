@@ -36,11 +36,13 @@ from setuptools import setup, find_packages
 
 PRE = "{Personal-Access-Token-Name}:{Personal-Access-Token}"
 
-try: # for pip >= 10
+try:
+    # for pip >= 10
     from pip._internal.req import parse_requirements
     install_requirements = list(parse_requirements('requirements.txt', session='hack'))
     requirements = [str(ir.requirement) for ir in install_requirements]
-except ImportError: # for pip <= 9.0.3
+except ImportError:
+    # for pip <= 9.0.3
     from pip.req import parse_requirements
     install_requirements = parse_requirements('requirements.txt', session='hack')
     requirements = [str(ir.req) for ir in install_requirements]

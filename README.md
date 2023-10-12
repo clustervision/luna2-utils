@@ -11,6 +11,9 @@ This project is a part of luna project. Luna2 Utils have all kind of necessary u
 3. lpower <br />
 4. lcluster <br />
 5. lslurm <br />
+6. limport <br />
+7. lnode <br />
+8. trinity_diagnosis <br />
 
 After installing the Luna 2 Utils via pip, all those commands will be available for further use.<br />
 To use lslurm, kindly locate your installation directory. There is a file called slurm.ini<br />
