@@ -1,5 +1,6 @@
 #!/trinity/local/python/bin/python3
 # -*- coding: utf-8 -*-
+#pylint: disable=line-too-long,no-member,broad-except
 
 # This code is part of the TrinityX software suite
 # Copyright (C) 2023  ClusterVision Solutions b.v.
@@ -31,41 +32,27 @@ __status__      = "Development"
 
 import os
 import re
+import sys
+import argparse
 import ipaddress
-from itertools import zip_longest
+import subprocess
 from functools import partial
+from itertools import zip_longest
+from configparser import ConfigParser
 
-
-import fire
+import jwt
 import openpyxl
 import requests
 from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill
 
 
+TOKEN = None
+LUNA_CONFIG_PATH = '/trinity/local/luna/utils/config/luna.ini'
+settings = ConfigParser()
+settings.read(LUNA_CONFIG_PATH)
+requests.packages.urllib3.disable_warnings()
 
-import requests
-from requests import Session
-from requests.adapters import HTTPAdapter
-import urllib3
-from urllib3.util import Retry
-
-
-urllib3.disable_warnings()
-session = Session()
-retries = Retry(
-    total = 60,
-    backoff_factor = 0.1,
-    status_forcelist = [502, 503, 504],
-    allowed_methods = {'GET', 'POST'}
-)
-session.mount('https://', HTTPAdapter(max_retries=retries))
-
-
-
-TOKEN_FILE = '/trinity/local/luna/utils/config/token.txt'
-LUNA_HOST = 'localhost'
-LUNA_PORT = 7050
 
 def print_info(msg):
     """Print an info message"""
@@ -79,30 +66,55 @@ def print_fatal(msg):
     """Print a fatal error message"""
     print(f'\033[91mFATAL\033[0m: {msg}')
 
-def get_token():
-    '''
-    Reads the token from /trinity/local/luna/utils/config/token.txt
 
-    Returns:
-        str: The token
-    '''
-    with open(TOKEN_FILE, 'r', encoding='utf8') as f:
-        return f.read().strip()
+def get_token():
+    """
+
+    This method will fetch a valid token for further use.
+
+    """
+    # If there is a token check that is valid and return it
+    if TOKEN is not None:
+        try:
+            # Try to decode the token to check if it is still valid
+            jwt.decode(TOKEN, settings['API']['SECRET_KEY'], algorithms=['HS256'])
+            return TOKEN
+        except jwt.exceptions.ExpiredSignatureError:
+            # If the token is expired is ok, we fetch a new one
+            pass
+
+    # Otherwise just fetch a new one
+    data = {'username': settings['API']['USERNAME'], 'password': settings['API']['PASSWORD']}
+    daemon_url = f"{settings['API']['PROTOCOL']}://{settings['API']['ENDPOINT']}/token"
+    response = requests.post(
+        daemon_url,
+        json=data,
+        stream=True,
+        timeout=3,
+        verify=(settings['API']['VERIFY_CERTIFICATE'].lower() == 'true'))
+    token = response.json()['token']
+    return token
+
 
 def get_network_info(network_name):
     '''
     Get the network info from luna
-    
+
     Args:
         network_name (str): The network name
-        
+
     Returns:
         dict: The network info'''
-    resp = session.get(f'https://{LUNA_HOST}:{LUNA_PORT}/config/network/{network_name}', stream=True, timeout=5, verify=False)
+    headers = {'x-access-tokens': get_token()}
+    resp = requests.get(f"{settings['API']['PROTOCOL']}://{settings['API']['ENDPOINT']}/config/network/{network_name}",
+                        stream=True,
+                        timeout=3,
+                        verify=(settings['API']['VERIFY_CERTIFICATE'].lower() == 'true'),
+                        headers=headers)
     if resp.status_code != 200:
         return None
-    else:
-        return resp.json()['config']['network'][network_name]
+
+    return resp.json()['config']['network'][network_name]
 
 def get_group_info(group_name):
     '''
@@ -114,11 +126,16 @@ def get_group_info(group_name):
     Returns:
         dict: The group info
     '''
-    resp = session.get(f'https://{LUNA_HOST}:{LUNA_PORT}/config/group/{group_name}', stream=True, timeout=5, verify=False)
+    headers = {'x-access-tokens': get_token()}
+    resp = requests.get(f"{settings['API']['PROTOCOL']}://{settings['API']['ENDPOINT']}/config/group/{group_name}",
+                        stream=True,
+                        timeout=3,
+                        verify=(settings['API']['VERIFY_CERTIFICATE'].lower() == 'true'),
+                        headers=headers)
     if resp.status_code != 200:
         return None
-    else:
-        return resp.json()['config']['group'][group_name]
+
+    return resp.json()['config']['group'][group_name]
 
 def add_node(nodename, nodeinfo):
     '''
@@ -133,7 +150,12 @@ def add_node(nodename, nodeinfo):
     '''
 
     headers = {'x-access-tokens': get_token()}
-    resp = session.post(f'https://{LUNA_HOST}:{LUNA_PORT}/config/node/{nodename}', stream=True, timeout=5, verify=False,  json={'config':{'node': {nodename: nodeinfo}}}, headers=headers)
+    resp = requests.post(f"{settings['API']['PROTOCOL']}://{settings['API']['ENDPOINT']}/config/node/{nodename}",
+                         stream=True,
+                         timeout=3,
+                         verify=(settings['API']['VERIFY_CERTIFICATE'].lower() == 'true'),
+                         json={'config':{'node': {nodename: nodeinfo}}},
+                         headers=headers)
     return resp.status_code
 
 class ExcelSheet():
@@ -150,21 +172,21 @@ class ExcelSheet():
             return self.workbook[sheet_name]
         except Exception as exc:
             print_error(f"Cannot open the worksheet: {exc}")
-            exit(1)
+            sys.exit(1)
 
     def _open_excel(self):
         try:
             return openpyxl.load_workbook(self.excel_path)
         except Exception as exc:
             print_error(f"Cannot open the excel file: {exc}")
-            exit(1)
+            sys.exit(1)
 
     def _save_excel(self):
         try:
             self.workbook.save(self.excel_path)
         except Exception as exc:
             print_error(f"Cannot save the excel file: {exc}")
-            exit(1)
+            sys.exit(1)
 
 class NetworksSheet(ExcelSheet):
     """
@@ -204,10 +226,10 @@ class NetworksSheet(ExcelSheet):
             ValueError: If the network name is not valid
         """
         if not network_name:
-            raise ValueError(f"Network name cannot be empty")
-        if not (network_name.isalnum()):
+            raise ValueError("Network name cannot be empty")
+        if not network_name.isalnum():
             raise ValueError(f"Network '{network_name}' contains invalid characters")
-        
+
         network_info = get_network_info(network_name)
         if not network_info:
             raise ValueError(f"Network '{network_name}' not found")
@@ -268,7 +290,7 @@ class NetworksSheet(ExcelSheet):
             ValueError: If the group name is not valid
         """
         if not group_name:
-            raise ValueError(f"Group name cannot be empty")
+            raise ValueError("Group name cannot be empty")
         if not all(c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in group_name):
             raise ValueError(f"Group '{group_name}' contains invalid characters")
 
@@ -325,10 +347,11 @@ class NetworksSheet(ExcelSheet):
         self._save_excel()
         if is_error:
             raise ValueError("Invalid excel file")
-        else:
-            print_info("Networks sheet ok!")
+
+        print_info("Networks sheet ok!")
 
     def get_networks_info(self):
+        """Get the networks info from the excel file"""
         return {
             'boot_network': get_network_info(self.worksheet['B1'].value),
             'ib_network'  : get_network_info(self.worksheet['B2'].value),
@@ -372,7 +395,7 @@ class NodesSheet(ExcelSheet):
         """
         if not hostname:
             raise ValueError("Hostname cannot be empty")
-        if not (hostname.isalnum()):
+        if not hostname.isalnum():
             raise ValueError("Hostname contains invalid characters")
 
     @classmethod
@@ -421,7 +444,7 @@ class NodesSheet(ExcelSheet):
             ValueError: If the ip address is not valid
         """
         if not ip_address:
-            return 
+            return
         cls._validate_ip_address(ip_address, network_info)
 
     def _validate_header(self):
@@ -431,7 +454,7 @@ class NodesSheet(ExcelSheet):
             ValueError: If the header is not valid
         """
         header = self.worksheet[1]
-        for col_index, (col, expected_col) in enumerate(zip_longest(header, self.header),1):
+        for _, (col, expected_col) in enumerate(zip_longest(header, self.header),1):
             if col.value != expected_col:
                 raise ValueError(f"Invalid header in cell {col.coordinate}. expected: {header} got: {col.value}")
 
@@ -470,8 +493,8 @@ class NodesSheet(ExcelSheet):
         self._save_excel()
         if is_error:
             raise ValueError("Invalid excel file")
-        else:
-            print_info("Nodes sheet ok!")
+
+        print_info("Nodes sheet ok!")
 
     def get_nodes(self):
         """Get the nodes from the excel file
@@ -514,19 +537,20 @@ class NodesSheet(ExcelSheet):
         nodes = self.get_nodes()
         for nodename, nodeinfo in nodes:
             status_code = add_node(nodename, nodeinfo)
-            if status_code == 200:
+            if status_code == 201:
                 print_info(f"Node '{nodename}' added successfully")
             elif status_code == 204:
-                print_info(f"Node '{nodename}' added/modified successfully")
+                print_info(f"Node '{nodename}' modified successfully")
             else:
                 print_fatal(f"Cannot add node '{nodename}', returned status_code: {status_code}")
-                exit(1)
+                sys.exit(1)
 
 class CLI():
     """
     Command that allows to bulk import nodes to luna from an excel file
     """
-    def add(self, excel_path: str):
+    @classmethod
+    def add(cls, excel_path: str):
         """Check the excel file to be imported and add the nodes to luna
 
         Args:
@@ -544,13 +568,14 @@ class CLI():
 
         except ValueError as exc:
             print_error(exc)
-            exit(1)
+            sys.exit(1)
 
-    def validate(self, excel_path: str):
+    @classmethod
+    def check(cls, excel_path: str):
         """Check the excel file to be imported
-        
+
         Args:
-            excel_path (str): The excel file to be validated"""
+            excel_path (str): The excel file to be checked"""
         try:
             network_sheet = NetworksSheet(excel_path)
             network_sheet.validate()
@@ -561,9 +586,10 @@ class CLI():
             nodes_sheet.validate()
         except ValueError as exc:
             print_error(exc)
-            exit(1)
+            sys.exit(1)
 
-    def template(self, target_path):
+    @classmethod
+    def copy_template(cls, target_path):
         """Copy the reference excel template to the target path
 
         Args:
@@ -576,18 +602,39 @@ class CLI():
             'limport',
             'nodes.xlsx')
         try:
-            os.system(f'cp {template_path} {target_path}')
+            subprocess.check_output(['cp', template_path, target_path])
             print_info(f"Template successfully copied in {target_path}")
         except Exception as exc:
             print_error(f"Cannot copy the template to {target_path}: {exc}")
-            exit(1)
+            sys.exit(1)
 
 
 def main():
     '''
     Main function
     '''
-    fire.Fire(CLI)
+    parser = argparse.ArgumentParser(description='Utility to import nodes in bulk to luna')
+    subparsers = parser.add_subparsers(help='sub-command help', dest='command')
+
+    parser_add = subparsers.add_parser('add', help='Add nodes to luna')
+    parser_add.add_argument('excel_path', help='The excel file to be imported')
+
+    parser_check = subparsers.add_parser('check', help='check the excel file')
+    parser_check.add_argument('excel_path', help='The excel file to be checkd')
+
+    parser_template = subparsers.add_parser('copy_template', help='Copy the reference excel template')
+    parser_template.add_argument('target_path', help='The path where the excel file will be generated')
+
+    args = parser.parse_args()
+    if args.command == 'add':
+        CLI.add(args.excel_path)
+    elif args.command == 'check':
+        CLI.check(args.excel_path)
+    elif args.command == 'copy_template':
+        CLI.copy_template(args.target_path)
+    else:
+        parser.print_help()
+
 
 
 if __name__ == '__main__':
