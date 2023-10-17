@@ -87,7 +87,8 @@ setup(
     maintainer_email = "support@clustervision.com",
     url = "https://gitlab.taurusgroup.one/clustervision/luna2-utils.git",
     download_url = f"https://{PRE}@gitlab.taurusgroup.one/api/v4/projects/14/packages/pypi/simple",
-    packages = find_packages(),
+    # packages = find_packages(),
+    packages = ['utils', 'data'],
     license = "MIT",
     keywords = [
         "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "slurm", "Trinity",
