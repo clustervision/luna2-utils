@@ -22,6 +22,9 @@ import os
 import base64
 import json
 import requests
+import urllib3
+
+urllib3.disable_warnings()
 
 HTTP_USER = ""
 HTTP_PASSWORD = ""
