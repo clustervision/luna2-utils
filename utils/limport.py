@@ -596,7 +596,7 @@ class CLI():
             target_path (str): The path where the excel file will be generated
         """
         template_path = os.path.join(
-            os.path.dirname(__file__),
+            os.path.dirname(os.path.realpath(__file__)),
             '..',
             'data',
             'limport',
