@@ -167,7 +167,7 @@ def main():
     parser_list.add_argument('node', help='the node to run the command on')
 
     parser_clear = subparsers.add_parser('clear', help='clear all the SEL entries for one or more nodes')
-    parser_clear.add_argument('nodes', help='the node(s) to run the command on', nargs='+')
+    parser_clear.add_argument('nodes', help='the node(s) to run the command on')
 
     args = parser.parse_args()
     cli = CLI()
