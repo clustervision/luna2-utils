@@ -104,8 +104,13 @@ class CLI():
 
         :param node: the node to run the command on
         '''
-        endpoint = f'{self._configs["API"]["PROTOCOL"]}://{self._configs["API"]["ENDPOINT"]}/control/action/sel/{node}/_list'
-        resp = self._send_request(endpoint, 'GET', None)
+        is_single_node = re.compile("^([a-zA-Z0-9_]+)$").match(node)
+        if (is_single_node):
+            endpoint = f'{self._configs["API"]["PROTOCOL"]}://{self._configs["API"]["ENDPOINT"]}/control/action/sel/{node}/_list'
+            resp = self._send_request(endpoint, 'GET', None)
+        else:
+            print_error('The list command can only be run on a single node, hostlist not supported')
+            sys.exit(1)
         print(resp.text)
 
 
@@ -159,8 +164,9 @@ def main():
     """
     The Main method to initiate the script.
     """
-
-    parser = argparse.ArgumentParser(description='Luna SEL commands')
+    usage = '%(prog)s {list,clear} <host|hostlist>'
+    parser = argparse.ArgumentParser(description='Luna SEL commands', usage=usage)
+    
     subparsers = parser.add_subparsers(help='sub-command help', dest='command')
 
     parser_list = subparsers.add_parser('list', help='list all the SEL entries for one node')
