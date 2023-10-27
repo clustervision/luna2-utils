@@ -49,8 +49,8 @@ from urllib3.util import Retry
 urllib3.disable_warnings()
 session = Session()
 retries = Retry(
-    total = 60,
-    backoff_factor = 0.1,
+    total = 10,
+    backoff_factor = 0.3,
     status_forcelist = [502, 503, 504],
     allowed_methods = {'GET', 'POST'}
 )
@@ -178,7 +178,7 @@ def getToken():
 
     token_credentials = {'username': CONF['USERNAME'], 'password': CONF['PASSWORD']}
     try:
-        x = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/token', json=token_credentials, stream=True, timeout=5, verify=CONF["VERIFY_CERTIFICATE"])
+        x = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/token', json=token_credentials, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
         if (str(x.status_code) in RET):
             print("Error: "+RET[str(x.status_code)])
             sys.exit(4)
@@ -225,7 +225,7 @@ def handleRequest(nodes=None ,groups=None, interface=None, subsystem=None, actio
         # single node query we do with GET
         if (result and nodes == result.group(1)):
             try:
-                r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}', stream=True, headers=headers, timeout=5, verify=CONF["VERIFY_CERTIFICATE"])
+                r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
                 if (r.text):
                     DATA=json.loads(r.text)
@@ -254,7 +254,7 @@ def handleRequest(nodes=None ,groups=None, interface=None, subsystem=None, actio
         else:
             try:
                 body = {'control': { subsystem: { action: { 'hostlist': nodes } } } }
-                r = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', stream=True, headers=headers, json=body, timeout=5, verify=CONF["VERIFY_CERTIFICATE"])
+                r = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', stream=True, headers=headers, json=body, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
                 if (status_code in RET):
                     print(nodes+": failed: "+RET[status_code])
@@ -264,7 +264,7 @@ def handleRequest(nodes=None ,groups=None, interface=None, subsystem=None, actio
                     # ------------- loop to keep polling for updates. -----------------------------------------------
                     while r.status_code == 200:
                         sleep(2)
-                        r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/status/{request_id}', stream=True, headers=headers, timeout=5, verify=CONF["VERIFY_CERTIFICATE"])
+                        r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/status/{request_id}', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
                         status_code=str(r.status_code)
                         if (r.status_code!=200):
                             return
