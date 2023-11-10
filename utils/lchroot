@@ -81,15 +81,28 @@ fi
 token=$(get_token)
 getRet=$(curl $INSECURE -H "x-access-tokens: $token" -s "${API_PROTOCOL}://${API_ENDPOINT}/config/osimage/$OSIMAGE")
 #getRet=$(luna osimage show $OSIMAGE --raw | grep -vE '^(\+|\|)')
-FAKE_KERN=$(echo "$getRet" | jq --raw-output ".config.osimage.$OSIMAGE.kernelversion")
-CHROOT_PATH=$(echo "$getRet" | jq --raw-output ".config.osimage.$OSIMAGE.path")
+FAKE_KERN=$(echo "$getRet" | jq --raw-output ".config.osimage.\"$OSIMAGE\".kernelversion")
+CHROOT_PATH=$(echo "$getRet" | jq --raw-output ".config.osimage.\"$OSIMAGE\".path")
+
+if [ ! "$FAKE_KERN" ]; then
+    echo "!! Warning: Could not determine the kernel version of the image." 
+    echo "!! This is not fatal but might result in LD_PRELOAD lines being printed while being in the lchroot"
+fi
+if [ ! "$CHROOT_PATH" ]; then
+    echo "!! Error: Could not determine the path of the image. I cannot continue."
+    exit 7
+fi
+if [ "$CHROOT_PATH" == "null" ]; then
+    echo "!! Error: Could not determine the path of the image. Does this image exist?"
+    exit 7
+fi
 
 echo "IMAGE PATH: $CHROOT_PATH"
 if [ -f $CHROOT_PATH/tmp/lchroot.lock ]; then
     TMP=$(cat $CHROOT_PATH/tmp/lchroot.lock)
     echo "File $CHROOT_PATH/tmp/lchroot.lock exists."
     echo "Currently ${TMP} is using lchroot. Exiting."
-    exit 8
+    exit 9
 fi
 
 CUR_TTY=$(tty)
