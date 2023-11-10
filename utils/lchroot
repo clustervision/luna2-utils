@@ -73,6 +73,10 @@ if [ ! "$CHROOT_PATH" ]; then
     echo "!! Error: Could not determine the path of the image. I cannot continue."
     exit 7
 fi
+if [ "$CHROOT_PATH" == "null" ]; then
+    echo "!! Error: Could not determine the path of the image. Does this image exist?"
+    exit 7
+fi
 
 echo "IMAGE PATH: $CHROOT_PATH"
 if [ -f $CHROOT_PATH/tmp/lchroot.lock ]; then
