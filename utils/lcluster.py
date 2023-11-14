@@ -105,6 +105,7 @@ class LCluster():
             allowed_methods={'GET', 'POST'},
         )
         self.session.mount('https://', HTTPAdapter(max_retries=self.retries))
+        self.daemon_validation()
 
 
     def get_option(self, parser=None, section=None, option=None):
@@ -127,6 +128,29 @@ class LCluster():
         sys.exit(1)
 
 
+    def daemon_validation(self):
+        """
+        This method will fetch a valid token for further use.
+        """
+        check = False
+        daemon_url = f'{self.daemon}/version'
+        try:
+            requests.get(url=daemon_url, timeout=2, verify=False)
+        except requests.exceptions.SSLError as ssl_loop_error:
+            check = True
+            self.exit_lcluster(ssl_loop_error)
+        except requests.exceptions.ConnectionError as conn_error:
+            check = True
+            self.exit_lcluster(conn_error)
+        except requests.exceptions.ReadTimeout as time_error:
+            check = True
+            self.exit_lcluster(time_error)
+        if check is True:
+            exception = f'ERROR :: Unable to reach {daemon_url} Try again or check the config'
+            self.exit_lcluster(exception)
+        return check
+
+
     def token(self):
         """
         This method will fetch a valid token for further use.
@@ -134,6 +158,7 @@ class LCluster():
         data = {'username': self.username, 'password': self.password}
         daemon_url = f'{self.daemon}/token'
         try:
+            
             call = self.session.post(
                 url=daemon_url,
                 json=data,
@@ -533,15 +558,16 @@ class LCluster():
         This method find out the slurm state for all nodes from slurm api.
         """
         response, slurm_response = {}, {}
+        socket_cmd = 'http+unix://%2Fvar%2Flib%2Fslurmrestd.socket/slurm/v0.0.38/nodes'
         for node in nodes:
             response[node] = False
         try:
             session = requests_unixsocket.Session()
-            socket_cmd = 'http+unix://%2Fvar%2Flib%2Fslurmrestd.socket/slurm/v0.0.38/nodes'
             slurm_call = session.get(socket_cmd)
             slurm_response = slurm_call.json()
         except Exception as exp:
-            print(f"UNIX SOCKET Exception while calling Slurm {exp}")
+            # print(f"WARNING :: While Calling Slurm API Socket {socket_cmd}")
+            # print(f"           UNIX SOCKET Exception happen {exp}")
             try:
                 headers = {'X-SLURM-USER-NAME': 'USERNAME', 'X-SLURM-USER-TOKEN': 'TOKEN'}
                 call_slurm = requests.get(
@@ -560,9 +586,8 @@ class LCluster():
                 for node in nodes:
                     response[node] = "SLURM Redirect"
             except requests.exceptions.RequestException:
-                print(f'Request Exception on {self.slurm_url}.')
-                for node in nodes:
-                    response[node] = "SLURM Down"
+                # print(f'WARNING :: Request Exception on {self.slurm_url}.')
+                response = self.slurm_cmd_state(nodes)
         if slurm_response:
             for node in nodes:
                 for state in slurm_response['nodes']:
