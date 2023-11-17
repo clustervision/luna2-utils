@@ -294,8 +294,8 @@ class LCluster():
                                     response[node] = 'ON'
                                 elif node in ipmi_status['control']['power']['ok'].keys():
                                     response[node] = 'ON'
-                                else:
-                                    response[node] = None
+                                # else:
+                                #     response[node] = None
                             return get_status_ipmi(ipmi_status_url, response)
                         else:
                             return get_status_ipmi(ipmi_status_url, response)
