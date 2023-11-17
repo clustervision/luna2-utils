@@ -294,8 +294,8 @@ class LCluster():
                                     response[node] = 'ON'
                                 elif node in ipmi_status['control']['power']['ok'].keys():
                                     response[node] = 'ON'
-                                else:
-                                    response[node] = None
+                                # else:
+                                #     response[node] = None
                             return get_status_ipmi(ipmi_status_url, response)
                         else:
                             return get_status_ipmi(ipmi_status_url, response)
@@ -443,6 +443,10 @@ class LCluster():
             text = colored(text, 'red')
         elif text in ['OFF', 'WARNING']:
             text = colored(text, 'yellow')
+        elif text == 'down*':
+            text = colored('DOWN', 'red')
+        elif text == 'idle':
+            text = colored('IDLE', 'green')
         else:
             text = colored(text, 'blue')
         return text
@@ -454,7 +458,7 @@ class LCluster():
         the Luna 2 Daemon Database
         """
         self.table.title = colored('<< Health & Status of Nodes >>', 'cyan', attrs=['bold'])
-        fields = ['S. No.', 'Node', 'IPMI', 'Luna', 'SLURM', 'Sensu']
+        fields = ['#', 'Node', 'IPMI', 'Luna', 'SLURM', 'Sensu']
         field = []
         for each in fields:
             field.append(colored(each, 'yellow', attrs=['bold']))
