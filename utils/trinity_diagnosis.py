@@ -67,8 +67,10 @@ class Diagnosis():
         if 'linux' in platform_name:
             with open("/etc/os-release", 'r', encoding='utf-8') as file:
                 for line in file:
-                    key,value = line.rstrip().split("=")
-                    self.os_info[key.lower()] = value.strip('"')
+                    line = line.rstrip()
+                    if "=" in line:
+                        key, value = line.split("=")
+                        self.os_info[key.lower()] = value.strip('"')
         else:
             self.exit_diagnosis(f'{platform_name} is not yet supported by Trinity.')
         return self.os_info
@@ -78,10 +80,9 @@ class Diagnosis():
         """
         This method will retrieve the value from the INI
         """
-        self.platform_info()
         self.check_controller()
         if self.controller is False:
-            self.exit_diagnosis('TRIX Diagnosis is only Available from the Controller OR Luna2 Daemon is not present.')
+            self.exit_diagnosis('Trinity Diagnosis is only Available from the Controller OR Luna2 Daemon is not present.')
         response = ''
         with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True) as process:
             output, error = process.communicate()
@@ -132,9 +133,17 @@ def main():
         "LDAP": {"slapd": None, "sssd": None},
         "Slurm": {"slurmctld": None, },
         "Monitoring core": {"influxdb": None, "telegraf": None, "grafana-server": None, "sensu-server": None, "sensu-api": None, "rabbitmq-server": None},
-        "Trinity OOD": {"httpd": None}
+        "Trinity OOD": {}
     }
-
+    debian = False
+    os_info = Diagnosis().platform_info()
+    for _, os_value in os_info.items():
+        if 'debian' in os_value.lower() or 'ubuntu' in os_value.lower():
+            debian = True
+    if debian is True:
+        response["Trinity OOD"]["apache2"] = None
+    else:
+        response["Trinity OOD"]["httpd"] = None
     for key, value in response.items():
         for service, val in value.items():
             response[key][service] = Diagnosis().trinity_status(f"systemctl status {service}.service | grep Active:")
