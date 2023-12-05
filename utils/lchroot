@@ -79,8 +79,16 @@ if [ "x${OSIMAGE}" = "x" ]; then
     exit 7
 fi
 token=$(get_token)
+
+getHA=$(curl $INSECURE -H "x-access-tokens: $token" -s "${API_PROTOCOL}://${API_ENDPOINT}/ha/state" 2> /dev/null)
+HA_STATE=$(echo "$getHA" | jq --raw-output ".ha.enabled" 2> /dev/null)
+HA_MASTER=$(echo "$getHA" | jq --raw-output ".ha.master" 2> /dev/null)
+
+if [ "$HA_STATE" == "true" ] && [ "$HA_MASTER" != "true" ]; then
+    echo "!! Big Warning: changes made on an image on a Non-master controller will be lost after sync." 
+fi
+
 getRet=$(curl $INSECURE -H "x-access-tokens: $token" -s "${API_PROTOCOL}://${API_ENDPOINT}/config/osimage/$OSIMAGE")
-#getRet=$(luna osimage show $OSIMAGE --raw | grep -vE '^(\+|\|)')
 FAKE_KERN=$(echo "$getRet" | jq --raw-output ".config.osimage.\"$OSIMAGE\".kernelversion")
 CHROOT_PATH=$(echo "$getRet" | jq --raw-output ".config.osimage.\"$OSIMAGE\".path")
 
@@ -114,3 +122,9 @@ mount_d
 shift
 
 FAKE_KERN=$FAKE_KERN LD_PRELOAD=libluna-fakeuname.so PS1="chroot [\u@$OSIMAGE \W]\$ " chroot $CHROOT_PATH "$@"
+
+if [ "$HA_STATE" == "true" ] && [ "$HA_MASTER" == "true" ]; then
+    # after we leave the chroot we make sure to have the other controllers pull the image
+    curl $INSECURE -H "x-access-tokens: $token" -s "${API_PROTOCOL}://${API_ENDPOINT}/ha/syncimage/$OSIMAGE" &> /dev/null
+fi
+
