@@ -220,29 +220,32 @@ class LCluster():
         if get_node_list:
             response, nodes = [], []
             node_status, sensu_state = {}, {}
-            for node in get_node_list['config']['node']:
-                nodes.append(node)
-                if 'hostname' in get_node_list['config']['node'][node]:
-                    sensu_state[get_node_list['config']['node'][node]['hostname']] = False
-                else:
-                    sensu_state[node] = False
-                node_status[node] = get_node_list['config']['node'][node]['status']
-            ipmi_state = self.get_ipmi_state(nodes)
-            slurm_state = self.call_slurm(slurm, nodes)
-            sensu_state = self.check_sensu(sensu_state, sensu_data)
-            count = 1
-            for node, _ in ipmi_state.items():
-                response.append([
-                    self.get_colored(count),
-                    self.get_colored(node),
-                    self.get_colored(ipmi_state[node]),
-                    self.get_colored(node_status[node]),
-                    self.get_colored(slurm_state[node]),
-                    self.get_colored(sensu_state[get_node_list['config']['node'][node]['hostname']])
-                    ]
-                )
-                count = count + 1
-            self.show_table(response)
+            if 'config' in get_node_list:
+                for node in get_node_list['config']['node']:
+                    nodes.append(node)
+                    if 'hostname' in get_node_list['config']['node'][node]:
+                        sensu_state[get_node_list['config']['node'][node]['hostname']] = False
+                    else:
+                        sensu_state[node] = False
+                    node_status[node] = get_node_list['config']['node'][node]['status']
+                ipmi_state = self.get_ipmi_state(nodes)
+                slurm_state = self.call_slurm(slurm, nodes)
+                sensu_state = self.check_sensu(sensu_state, sensu_data)
+                count = 1
+                for node, _ in ipmi_state.items():
+                    response.append([
+                        self.get_colored(count),
+                        self.get_colored(node),
+                        self.get_colored(ipmi_state[node]),
+                        self.get_colored(node_status[node]),
+                        self.get_colored(slurm_state[node]),
+                        self.get_colored(sensu_state[get_node_list['config']['node'][node]['hostname']])
+                        ]
+                    )
+                    count = count + 1
+                self.show_table(response)
+            else:
+                self.exit_lcluster(f'No Nodes available with {self.daemon}')
         else:
             self.exit_lcluster(f'No Nodes available with {self.daemon}')
 
