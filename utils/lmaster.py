@@ -45,9 +45,9 @@ def main(argv):
 
 def callHelp():
     print ("""
-usage: lpower [-h|-s|-w]
+usage: lmaster [-h|-s|-w]
 
-Gets master state of controller, based on cli luna.ini config
+Gets Luna2 master state of controller, based on cli luna.ini config
 
 optional arguments:
   -h, --help            show this help message and exit
