@@ -132,7 +132,7 @@ def main():
         "Luna": {"luna2-daemon": None, "aria2c": None},
         "LDAP": {"slapd": None, "sssd": None},
         "Slurm": {"slurmctld": None, },
-        "Monitoring core": {"influxdb": None, "telegraf": None, "grafana-server": None, "sensu-server": None, "sensu-api": None, "rabbitmq-server": None},
+        "Monitoring core": {"grafana-server": None, "prometheus-server": None},
         "Trinity OOD": {}
     }
     debian = False
