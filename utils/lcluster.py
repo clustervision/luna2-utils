@@ -81,9 +81,8 @@ class LCluster():
                 self.security = self.get_option(configparser, 'API', 'VERIFY_CERTIFICATE')
                 self.security = True if self.security.lower() in ['y', 'yes', 'true']  else False
                 if ':' in self.daemon:
-                    sensu_url = self.daemon.split(':')
-                    self.sensu_url = f"http://{sensu_url[0]}:3001/events"
-                    self.slurm_url = f"http://{sensu_url[0]}:6802/slurm/v0.0.38/nodes"
+                    hostname, port =  self.daemon.split(':')
+                    self.slurm_url = f"http://{hostname}:6802/slurm/v0.0.38/nodes"
                 self.daemon = f'{self.protocol}://{self.daemon}'
             else:
                 self.errors.append(f'API section is not found in {INI_FILE}.')
@@ -215,22 +214,17 @@ class LCluster():
         """
         node_url = f'{self.daemon}/config/node'
         get_node_list = self.get_data(node_url, True)
-        sensu_data = self.get_data(self.sensu_url)
         slurm = self.choose_slurm()
         if get_node_list:
             response, nodes = [], []
-            node_status, sensu_state = {}, {}
+            node_status = {}
             if 'config' in get_node_list:
                 for node in get_node_list['config']['node']:
                     nodes.append(node)
-                    if 'hostname' in get_node_list['config']['node'][node]:
-                        sensu_state[get_node_list['config']['node'][node]['hostname']] = False
-                    else:
-                        sensu_state[node] = False
                     node_status[node] = get_node_list['config']['node'][node]['status']
                 ipmi_state = self.get_ipmi_state(nodes)
                 slurm_state = self.call_slurm(slurm, nodes)
-                sensu_state = self.check_sensu(sensu_state, sensu_data)
+
                 count = 1
                 for node, _ in ipmi_state.items():
                     response.append([
@@ -239,7 +233,6 @@ class LCluster():
                         self.get_colored(ipmi_state[node]),
                         self.get_colored(node_status[node]),
                         self.get_colored(slurm_state[node]),
-                        self.get_colored(sensu_state[get_node_list['config']['node'][node]['hostname']])
                         ]
                     )
                     count = count + 1
@@ -442,8 +435,6 @@ class LCluster():
         """
         if text is True or text in ['PASS', 'ON']:
             text = colored(text, 'green')
-        elif text is False or text in ['CRITICAL', 'Sensu Down'] or text is None:
-            text = colored(text, 'red')
         elif text in ['OFF', 'WARNING']:
             text = colored(text, 'yellow')
         elif text == 'down*':
@@ -461,7 +452,7 @@ class LCluster():
         the Luna 2 Daemon Database
         """
         self.table.title = colored('<< Health & Status of Nodes >>', 'cyan', attrs=['bold'])
-        fields = ['#', 'Node', 'IPMI', 'Luna', 'SLURM', 'Sensu']
+        fields = ['#', 'Node', 'IPMI', 'Luna', 'SLURM']
         field = []
         for each in fields:
             field.append(colored(each, 'yellow', attrs=['bold']))
@@ -469,42 +460,6 @@ class LCluster():
         self.table.add_rows(rows)
         print(self.table)
         return True
-
-
-    def node_status(self, node):
-        """
-        This method return the status of a node.
-        """
-        response = False
-        monitor_url = f'{self.daemon}/monitor/status/{node}'
-        data = self.get_data(monitor_url, True)
-        if data:
-            response = data['monitor']['status'][node]['state']
-        return response
-
-
-    def check_sensu(self, nodelist=None, sensu_data=None):
-        """
-        This method will filter the correct status for the Sensu
-        for a node.
-        """
-        if sensu_data:
-            for node in nodelist:
-                for data in sensu_data:
-                    if node in data['client']['name']:
-                        if data['check']['status'] == 1:
-                            nodelist[node] = "WARNING"
-                        elif data['check']['status'] == 2:
-                            nodelist[node] = "CRITICAL"
-                        else:
-                            nodelist[node] = "UNKNOWN"
-                    else:
-                        nodelist[node] = "PASS"
-        else:
-            for node in nodelist:
-                nodelist[node] = "PASS"
-        return nodelist
-
 
     def choose_slurm(self):
         """
