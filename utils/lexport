@@ -503,8 +503,8 @@ def pack_image(cluster='cluster',name=None,path=None,image_file=None):
         packed_image_file = f"{TMP_DIR}/{image_file}"
         if os.path.exists('/usr/bin/lbzip2') and os.path.exists('/usr/bin/tar'):
             # testing only:
-            print(f"cluster: {cluster}, name: {name}, path: {path}")
-            return True
+            #print(f"cluster: {cluster}, name: {name}, path: {path}")
+            #return True
             try:
                 output = subprocess.check_output(
                     [
