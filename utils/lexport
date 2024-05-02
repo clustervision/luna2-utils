@@ -38,7 +38,8 @@ import sys
 from builtins import dict
 import re
 import json
-from time import sleep
+from time import sleep, time
+import subprocess
 from configparser import RawConfigParser
 import requests
 from requests import Session
@@ -49,6 +50,7 @@ from urllib3.util import Retry
 import logging
 LOG_DIR = '/var/log/luna'
 LOG_FILE = '/var/log/luna/lexport.log'
+TMP_DIR='/tmp'
 
 def log_checker():
     """
@@ -425,13 +427,38 @@ def handleImageRequest(action=None,file=None,name=None,path=None,force=False):
             if not name:
                 print("Error: not enough parameters to run with. i need an osimage name.")
                 exit(2)
+            cluster_name = 'cluster'
             try:
+                r = requests.get(f'http://{CONF["ENDPOINT"]}/config/cluster',headers=headers)
+                status_code=str(r.status_code)
+                if status_code == '200':
+                    data=json.loads(r.text)
+                    cluster_name = data['config']['cluster']['name'] or 'cluster'
                 r = requests.get(f'http://{CONF["ENDPOINT"]}/config/osimage/{name}',headers=headers)
                 status_code=str(r.status_code)
                 if status_code == '200':
+                    data=json.loads(r.text)
+                    config=data['config']['osimage'][name]
+                    image_file=f'{cluster_name}-{name}.tar.bz2'
+                    if config['path']:
+                        ret = pack_image(cluster=cluster_name, name=name, path=config['path'], image_file=image_file)
+                    if not ret:
+                        print("Encountered a problem exporting osimage")
+                        exit(4)
                     if file:
-                        with open(file,'w', encoding = "utf-8") as file:
-                            file.write(r.text)
+                        file = f"{file}.tar"
+                    else:
+                        epoch_time = int(time())
+                        file = f"{cluster_name}-{name}-{epoch_time}.tar"
+                    if file:
+                        with open(f"{TMP_DIR}/.config.dat",'w', encoding = "utf-8") as config_file:
+                            config_file.write(r.text)
+                        ret = merge(file=file, config_file='.config.dat', image_file=image_file)
+                        if not ret:
+                            print("Encountered a problem exporting osimage")
+                            exit(4)
+                        print("finished exporting")
+                        exit(0)
                     else:
                         print (r.text)
                     exit(0)
@@ -467,6 +494,73 @@ def handleImageRequest(action=None,file=None,name=None,path=None,force=False):
     else:
         print("Error: not enough parameters to run with")
         exit(2)
+
+# ----------------------------------------------------------------------------
+
+def pack_image(cluster='cluster',name=None,path=None,image_file=None):
+    if name and path and image_file:
+        epoch_time = int(time())
+        packed_image_file = f"{TMP_DIR}/{image_file}"
+        if os.path.exists('/usr/bin/lbzip2') and os.path.exists('/usr/bin/tar'):
+            # testing only:
+            print(f"cluster: {cluster}, name: {name}, path: {path}")
+            return True
+            try:
+                output = subprocess.check_output(
+                    [
+                        '/usr/bin/tar',
+                        '-C', f"{path}",
+                        '--one-file-system',
+                        '--xattrs',
+                        '--selinux',
+                        '--acls',
+                        '--ignore-failed-read',
+                        '--exclude=/proc/*',
+                        '--exclude=/dev/*',
+                        '--exclude=/sys/*',
+                        '--checkpoint=100000',
+                        '--use-compress-program=/usr/bin/lbzip2',
+                        '-c', '-f', packed_image_file, '.'
+                    ],
+                    stderr=subprocess.STDOUT,
+                    universal_newlines=True)
+            except subprocess.CalledProcessError as exc:
+                if os.path.isfile(packed_image_file):
+                    os.remove(packed_image_file)
+                output=f"{exc.output}"
+                outputs=output.split("\n")
+                joined='. '.join(outputs[-5:])
+                print(f"Tarring {name} failed with exit code {exc.returncode}: {joined}")
+                return False
+            print(f"Tarring {name} successful.")
+            return True
+        print("tar and bzip2 need to be installed")
+        return False
+    print("Not enough parameters to work with. could not continue due to missing osimage name or path")
+    return False
+
+def merge(file=None,image_file=None,config_file=None):
+    if file and image_file and config_file:
+        if True:
+            try:
+                output = subprocess.check_output(
+                    [
+                        '/usr/bin/tar',
+                        '-C', f"{TMP_DIR}/",
+                        '-cf', file, 
+                        f"{config_file}",
+                        f"{image_file}"
+                    ],
+                    stderr=subprocess.STDOUT,
+                    universal_newlines=True)
+            except subprocess.CalledProcessError as exc:
+                output=f"{exc.output}"
+                outputs=output.split("\n")
+                joined='. '.join(outputs[-5:])
+                print(f"Merging {file} failed with exit code {exc.returncode}: {joined}")
+                return False
+        return True
+    return False
 
 # ----------------------------------------------------------------------------
 
