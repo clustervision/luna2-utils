@@ -48,7 +48,7 @@ from urllib3.util import Retry
 
 import logging
 LOG_DIR = '/var/log/luna'
-LOG_FILE = '/var/log/luna/lpower.log'
+LOG_FILE = '/var/log/luna/lexport.log'
 
 def log_checker():
     """
@@ -164,35 +164,62 @@ def main(argv):
     IMAGEPATH=None
     IMAGENAME=None
     FORCE=False
-    for i in range(0, len(argv)):
-        if (argv[i] == "-h" or argv[i] == "--help"):
+    if (len(argv) == 0):
+        call_help()
+        exit()
+    while len(argv)>0:
+        item = argv.pop(0)
+        if (item == "-h" or item == "--help"):
             call_help()
             exit()
-        elif (argv[i] == "-c" or argv[i] == "--cluster"):
+        elif (item == "-c" or item == "--cluster"):
             WHAT='cluster'
-        elif (argv[i] == "-o" or argv[i] == "--osimage"):
+        elif (item == "-o" or item == "--osimage"):
             WHAT='image'
-        elif (argv[i] == "-e" or argv[i] == "--export"):
+        elif (item == "-e" or item == "--export"):
             ACTION='export'
-        elif (argv[i] == "-i" or argv[i] == "--import"):
+        elif (item == "-i" or item == "--import"):
             ACTION='import'
-        elif (argv[i] == "-p" or argv[i] == "--path"):
-            i+=1
-            IMAGEPATH=argv[i]
-        elif (argv[i] == "-n" or argv[i] == "--name"):
-            i+=1
-            IMAGENAME=argv[i]
-        elif (argv[i] == "-f" or argv[i] == "--force"):
+        elif (item == "-f" or item == "--force"):
             FORCE=True
-        elif (argv[i][0] == "-"):
+        elif (item == "-p" or item == "--path"):
+            IMAGEPATH=argv.pop(0)
+        elif (item == "-n" or item == "--name"):
+            IMAGENAME=argv.pop(0)
+        elif (item[0] == "-"):
             print("Error: Invalid options used.")
             call_help()
             exit()
         else:
-            FILE=argv[i]
-    if (len(argv) == 0):
-        call_help()
-        exit()
+            FILE=item
+
+#    for i in range(0, len(argv)):
+#        if (argv[i] == "-h" or argv[i] == "--help"):
+#            call_help()
+#            exit()
+#        elif (argv[i] == "-c" or argv[i] == "--cluster"):
+#            WHAT='cluster'
+#        elif (argv[i] == "-o" or argv[i] == "--osimage"):
+#            WHAT='image'
+#        elif (argv[i] == "-e" or argv[i] == "--export"):
+#            ACTION='export'
+#        elif (argv[i] == "-i" or argv[i] == "--import"):
+#            ACTION='import'
+#        elif (argv[i] == "-f" or argv[i] == "--force"):
+#            FORCE=True
+#        elif (argv[i] == "-p" or argv[i] == "--path"):
+#            i+=1
+#            IMAGEPATH=argv[i]
+#        elif (argv[i] == "-n" or argv[i] == "--name"):
+#            i+=1
+#            IMAGENAME=argv[i]
+#        elif (argv[i][0] == "-"):
+#            print("Error: Invalid options used.")
+#            call_help()
+#            exit()
+#        else:
+#            i+=1
+#            FILE=argv[i]
     if ((WHAT is None) or (ACTION is None)):
         print("Error: Instruction incomplete. Nodes and Task expected.")
         call_help()
@@ -222,7 +249,10 @@ positional arguments:
 
 optional arguments:
   file                  use file for im/exports. mandatory when importing.
+                        when exporting osimage and no file given, it will render
+                        a file based on cluster name, osimage name and date.
                         without --force it will warn if a file will be overwritten.
+  -n, --name            used only in combination with osimage operations.
   -h, --help            show this help message and exit.
   -f, --force           do not warn, do not ask, just do it.
 
@@ -324,13 +354,13 @@ def getToken():
 # ----------------------------------------------------------------------------
 
 def handleClusterRequest(action=None,file=None,force=False):
-    if action or (action and action == 'import' and file):
+    if (action and action == 'export') or (action and action == 'import' and file):
         if ('TOKEN' not in CONF):
             getToken()
         if ('ENDPOINT' not in CONF):
             readConfigFile()
 
-        RET={'400': 'invalid request', '404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
+        RET={'400': 'invalid request', '404': 'unhandled request', '401': 'action not authorized', '503': 'service not available'}
 
         headers = {'x-access-tokens': CONF['TOKEN']}
 
@@ -376,6 +406,67 @@ def handleClusterRequest(action=None,file=None,force=False):
                 print("Error: trouble getting results: "+str(err))
     else:
         print("Error: not enough parameters to run with")
+        exit(2)
+
+# ----------------------------------------------------------------------------
+
+def handleImageRequest(action=None,file=None,name=None,path=None,force=False):
+    if (action and action == 'export') or (action and action == 'import' and file):
+        if ('TOKEN' not in CONF):
+            getToken()
+        if ('ENDPOINT' not in CONF):
+            readConfigFile()
+
+        RET={'400': 'invalid request', '404': 'unknown osimage', '401': 'action not authorized', '503': 'service not available'}
+
+        headers = {'x-access-tokens': CONF['TOKEN']}
+
+        if action == 'export':
+            if not name:
+                print("Error: not enough parameters to run with. i need an osimage name.")
+                exit(2)
+            try:
+                r = requests.get(f'http://{CONF["ENDPOINT"]}/config/osimage/{name}',headers=headers)
+                status_code=str(r.status_code)
+                if status_code == '200':
+                    if file:
+                        with open(file,'w', encoding = "utf-8") as file:
+                            file.write(r.text)
+                    else:
+                        print (r.text)
+                    exit(0)
+                else:
+                    print(f"Error processing request: {r.text}")
+                    exit(2)
+            except requests.exceptions.HTTPError as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
+            except requests.exceptions.ConnectionError as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
+            except requests.exceptions.Timeout as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
+        elif action == 'import':
+            try:
+                with open(file,'r', encoding = "utf-8") as file:
+                    data=file.read()
+                    myjson=json.loads(data)
+                r = requests.post(f'http://{CONF["ENDPOINT"]}/config/cluster/import', json=myjson, headers=headers)
+                status_code=str(r.status_code)
+                print("["+status_code+'] ::: '+r.text)
+   
+            except requests.exceptions.HTTPError as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
+            except requests.exceptions.ConnectionError as err:
+                print("Error: trouble getting results: "+str(err))
+                exit(3)
+            except requests.exceptions.Timeout as err:
+                print("Error: trouble getting results: "+str(err))
+    else:
+        print("Error: not enough parameters to run with")
+        exit(2)
 
 # ----------------------------------------------------------------------------
 
