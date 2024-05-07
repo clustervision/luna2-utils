@@ -196,36 +196,8 @@ def main(argv):
             exit()
         else:
             FILE=item
-
-#    for i in range(0, len(argv)):
-#        if (argv[i] == "-h" or argv[i] == "--help"):
-#            call_help()
-#            exit()
-#        elif (argv[i] == "-c" or argv[i] == "--cluster"):
-#            WHAT='cluster'
-#        elif (argv[i] == "-o" or argv[i] == "--osimage"):
-#            WHAT='image'
-#        elif (argv[i] == "-e" or argv[i] == "--export"):
-#            ACTION='export'
-#        elif (argv[i] == "-i" or argv[i] == "--import"):
-#            ACTION='import'
-#        elif (argv[i] == "-f" or argv[i] == "--force"):
-#            FORCE=True
-#        elif (argv[i] == "-p" or argv[i] == "--path"):
-#            i+=1
-#            IMAGEPATH=argv[i]
-#        elif (argv[i] == "-n" or argv[i] == "--name"):
-#            i+=1
-#            IMAGENAME=argv[i]
-#        elif (argv[i][0] == "-"):
-#            print("Error: Invalid options used.")
-#            call_help()
-#            exit()
-#        else:
-#            i+=1
-#            FILE=argv[i]
     if ((WHAT is None) or (ACTION is None)):
-        print("Error: Instruction incomplete. Nodes and Task expected.")
+        print("Error: Instruction incomplete. Required options or flags missing.")
         call_help()
         exit()
     if WHAT == 'cluster':
@@ -252,13 +224,13 @@ positional arguments:
   -i, --import          imports configuration/data.
 
 optional arguments:
-  file                  use file for im/exports. mandatory when importing.
+  file                  use file for imports and exports. mandatory when importing.
                         when exporting osimage and no file given, it will render
                         a file based on cluster name, osimage name and date.
                         without --force it will warn if a file will be overwritten.
   -n, --name            used only in combination with osimage operations.
   -m, --matthew         use an external config file during osimage operations, Matthew mode. 
-                        used for imports and exports, but without any warrent.
+                        used for osimage imports and exports. handle with care.
   -h, --help            show this help message and exit.
   -f, --force           do not warn, do not ask, just do it.
 
@@ -414,6 +386,7 @@ def handleClusterRequest(action=None,file=None,force=False):
                 status_code=str(r.status_code)
                 if status_code == '201':
                     print(f"finished importing configuration")
+                    exit(0)
                 print(f"importing failed with code {status_code}: {r.text}")
                 logger.error(f"CONFIG: importing failed with code {status_code}: {r.text}")
    
