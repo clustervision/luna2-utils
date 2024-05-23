@@ -204,7 +204,10 @@ usage: lpower [-h] [--rack|-r RACKNAME] [--group|-g GROUP]
 BMC power management.
 
 positional arguments:
-  hosts                     Host list
+  hosts                     Host list. Any combination of: 
+                               node[x-y],
+                               nodex,nodey,...
+                               nodex
   {status,on,off,reset,cycle,identify,noidentify}
                             Action
 
