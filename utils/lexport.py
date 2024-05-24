@@ -344,7 +344,7 @@ def handleClusterRequest(action=None,file=None,force=False):
 
         if action == 'export':
             try:
-                r = requests.get(f'http://{CONF["ENDPOINT"]}/config/cluster/export',headers=headers)
+                r = requests.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/cluster/export',headers=headers, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
                 if status_code == '200':
                     if file:
@@ -382,7 +382,7 @@ def handleClusterRequest(action=None,file=None,force=False):
                 with open(file,'r', encoding = "utf-8") as file:
                     data=file.read()
                     myjson=json.loads(data)
-                r = requests.post(f'http://{CONF["ENDPOINT"]}/config/cluster/import', json=myjson, headers=headers)
+                r = requests.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/cluster/import', json=myjson, headers=headers, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
                 if status_code == '201':
                     print(f"finished importing configuration")
@@ -424,12 +424,12 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
                 exit(2)
             cluster_name = 'cluster'
             try:
-                r = requests.get(f'http://{CONF["ENDPOINT"]}/config/cluster',headers=headers)
+                r = requests.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/cluster',headers=headers, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
                 if status_code == '200':
                     data=json.loads(r.text)
                     cluster_name = data['config']['cluster']['name'] or 'cluster'
-                r = requests.get(f'http://{CONF["ENDPOINT"]}/config/osimage/{name}', headers=headers)
+                r = requests.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/osimage/{name}', headers=headers, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
                 if status_code == '200':
                     data=json.loads(r.text)
@@ -529,18 +529,18 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
                 if name:
                     image_name=name
                     image_config['name']=name
-                r = requests.get(f'http://{CONF["ENDPOINT"]}/config/osimage/{name}', headers=headers)
+                r = requests.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/osimage/{name}', headers=headers, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
                 logger.info(f"image check: {r.status_code}")
                 status_code=str(r.status_code)
                 if status_code == '200' and not force:
                     print(f"STOP :: osimage {image_name} already exists. Please use another name or use --force to override")
                     logger.error(f"IMPORT: STOP :: osimage {image_name} already exists")
                     exit(1)
-                r = requests.get(f'http://{CONF["ENDPOINT"]}/config/osimage/{image_name}/_delete', headers=headers)
+                r = requests.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/osimage/{image_name}/_delete', headers=headers, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
                 logger.info(f"delete return: {r.status_code}")
                 myjson={'config': {'osimage': {image_name: image_config}}}
                 logger.info(f"myjson: {myjson}")
-                r = requests.post(f'http://{CONF["ENDPOINT"]}/config/osimage/{image_name}', json=myjson, headers=headers)
+                r = requests.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/osimage/{image_name}', json=myjson, headers=headers, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
                 logger.info(f"add image returned: {r.status_code}")
                 status_code=str(r.status_code)
                 if status_code == '201':
