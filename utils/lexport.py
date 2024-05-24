@@ -213,7 +213,7 @@ def call_help():
     This method will provide a Help Menu.
     """
     print("""
-usage: lexport -<c|o> -<e|i> [file]
+usage: lexport <-c|-o> <-e|-i> [file]
 
 Luna configuration im/exporter.
 
