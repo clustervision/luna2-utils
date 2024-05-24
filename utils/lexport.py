@@ -191,13 +191,13 @@ def main(argv):
         elif (item == "-n" or item == "--name"):
             IMAGENAME=argv.pop(0)
         elif (item[0] == "-"):
-            print("Error: Invalid options used.")
+            print("ERROR :: Invalid options used.")
             call_help()
             exit()
         else:
             FILE=item
     if ((WHAT is None) or (ACTION is None)):
-        print("Error: Instruction incomplete. Required options or flags missing.")
+        print("ERROR :: Instruction incomplete. Required options or flags missing.")
         call_help()
         exit()
     if WHAT == 'cluster':
@@ -304,28 +304,28 @@ def getToken():
     try:
         x = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/token', json=token_credentials, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
         if (str(x.status_code) in RET):
-            print("Error: "+RET[str(x.status_code)])
+            print("ERROR :: "+RET[str(x.status_code)])
             sys.exit(4)
         DATA = json.loads(x.text)
         if (not 'token' in DATA):
-            print("Error: i did not receive a token. i cannot continue.")
+            print("ERROR :: i did not receive a token. i cannot continue.")
             sys.exit(5)
         CONF["TOKEN"]=DATA["token"]
     except requests.exceptions.SSLError as ssl_loop_error:
         print(f'ERROR :: {ssl_loop_error}')
         sys.exit(3)
     except requests.exceptions.HTTPError as err:
-        print("Error: trouble getting my token: "+str(err))
+        print("ERROR :: trouble getting my token: "+str(err))
         sys.exit(3)
     except requests.exceptions.ConnectionError as err:
-        print("Error: trouble getting my token: "+str(err))
+        print("ERROR :: trouble getting my token: "+str(err))
         sys.exit(3)
     except requests.exceptions.Timeout as err:
-        print("Error: trouble getting my token: "+str(err))
+        print("ERROR :: trouble getting my token: "+str(err))
         sys.exit(3)
 #    Below commented out as this catch all will also catch legit responses for e.g. 401 and 404
 #    except:
-#        print("Error: trouble getting my token for unknown reasons.")
+#        print("ERROR :: trouble getting my token for unknown reasons.")
 #        exit(3)
     
 
@@ -349,8 +349,8 @@ def handleClusterRequest(action=None,file=None,force=False):
                 if status_code == '200':
                     if file:
                         if os.path.exists(file) and not force:
-                            print(f"Stop!: {file} already exists. Please use another name or use --force to override")
-                            logger.error(f"CONFIG: Stop!: {file} already exists.")
+                            print(f"STOP :: {file} already exists. Please use another name or use --force to override")
+                            logger.error(f"CONFIG: STOP :: {file} already exists.")
                             exit(1)
                         with open(file,'w', encoding = "utf-8") as file:
                             file.write(r.text)
@@ -358,26 +358,26 @@ def handleClusterRequest(action=None,file=None,force=False):
                         print (r.text)
                     exit(0)
                 else:
-                    print(f"Error processing request: {r.text}")
+                    print(f"ERROR :: trouble processing request: {r.text}")
                     logger.error(f"CONFIG: export error processing request: {r.text}")
                     exit(2)
             except requests.exceptions.HTTPError as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
             except requests.exceptions.ConnectionError as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
             except requests.exceptions.Timeout as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
         elif action == 'import':
             try:
                 if not os.path.exists(file):
-                    print(f"Stop!: {file} does not exist")
-                    logger.error(f"CONFIG: Stop!: {file} does not exist")
+                    print(f"STOP :: {file} does not exist")
+                    logger.error(f"CONFIG: STOP :: {file} does not exist")
                     exit(1)
                 with open(file,'r', encoding = "utf-8") as file:
                     data=file.read()
@@ -391,18 +391,18 @@ def handleClusterRequest(action=None,file=None,force=False):
                 logger.error(f"CONFIG: importing failed with code {status_code}: {r.text}")
    
             except requests.exceptions.HTTPError as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
             except requests.exceptions.ConnectionError as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
             except requests.exceptions.Timeout as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
     else:
-        print("Error: not enough parameters to run with")
+        print("ERROR :: not enough parameters to run with")
         exit(2)
 
 # ----------------------------------------------------------------------------
@@ -420,7 +420,7 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
 
         if action == 'export':
             if not name:
-                print("Error: not enough parameters to run with. i need an osimage name.")
+                print("ERROR :: not enough parameters to run with. i need an osimage name.")
                 exit(2)
             cluster_name = 'cluster'
             try:
@@ -441,7 +441,7 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
                         file = f"{cluster_name}-{name}-{epoch_time}.tar"
                     logger.info(f"EXPORT: config: {config}, file: {file}")
                     if os.path.exists(file) and not force:
-                        print(f"Stop!: {file} already exists. Please use another name or use --force to override")
+                        print(f"STOP :: {file} already exists. Please use another name or use --force to override")
                         exit(1)
                     image_file=f'{cluster_name}-{name}.tar.bz2'
                     logger.info(f"EXPORT: image_file: {image_file}")
@@ -450,8 +450,8 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
                     if config['path']:
                         ret = pack_image(cluster=cluster_name, name=name, path=config['path'], image_file=image_file)
                     if not ret:
-                        print("Encountered a problem exporting osimage")
-                        logger.error(f"EXPORT: Encountered a problem exporting osimage")
+                        print("ERROR :: Encountered a problem exporting osimage")
+                        logger.error(f"EXPORT: ERROR :: Encountered a problem exporting osimage")
                         exit(4)
                     if file:
                         raw_config=json.loads(r.text)
@@ -460,48 +460,48 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
                             del image_config['assigned_tags']
                         if config_file: # Matthew mode
                             if os.path.exists(config_file) and not force:
-                                print(f"Stop!: {config_file} already exists. Please use another name or use --force to override")
-                                logger.error(f"EXPORT: Stop!: {config_file} already exists")
+                                print(f"STOP :: {config_file} already exists. Please use another name or use --force to override")
+                                logger.error(f"EXPORT: STOP :: {config_file} already exists")
                                 exit(1)
                             with open(config_file,'w', encoding = "utf-8") as mfile:
                                 mfile.write(json.dumps(image_config))
                         ret = merge(file=file, image_file=image_file, config=json.dumps(image_config))
                         if not ret:
-                            print("Encountered a problem exporting osimage")
-                            logger.error(f"EXPORT: Encountered a problem exporting osimage")
+                            print("ERROR :: Encountered a problem exporting osimage")
+                            logger.error(f"EXPORT: ERROR :: Encountered a problem exporting osimage")
                             exit(4)
                         print(f"finished exporting to {file}")
                         exit(0)
                     else:
-                        print(f"Stop!: i do not have a file to write to. not sure what went wrong")
-                        logger.error(f"EXPORT: Stop!: i do not have a file to write to")
+                        print(f"STOP :: i do not have a file to write to. not sure what went wrong")
+                        logger.error(f"EXPORT: STOP :: i do not have a file to write to")
                         exit(1)
                     exit(0)
                 else:
-                    print(f"Error processing request: {r.text}")
+                    print(f"ERROR :: trouble processing request: {r.text}")
                     logger.error(f"Error processing request: {r.text}")
                     exit(2)
             except requests.exceptions.HTTPError as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
             except requests.exceptions.ConnectionError as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
             except requests.exceptions.Timeout as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
         elif action == 'import':
             try:
                 if not os.path.exists(file):
-                    print(f"Stop!: {file} does not exist")
+                    print(f"STOP :: {file} does not exist")
                     exit(1)
                 image_config, image_file=unmerge(file=file)
                 if (not image_config) or (not image_file):
-                    print(f"Stop!: cannot continue. Missing config and/or a path. Is this a valid exported osimage?")
-                    logger.error(f"IMPORT: Stop!: cannot continue. Missing config and/or a path. Is this a valid exported osimage?")
+                    print(f"STOP :: cannot continue. Missing config and/or a path. Is this a valid exported osimage?")
+                    logger.error(f"IMPORT: STOP :: cannot continue. Missing config and/or a path. Is this a valid exported osimage?")
                     exit(1)
                 if config_file: # Matthew mode
                     with open(config_file,'r', encoding = "utf-8") as mfile:
@@ -515,12 +515,12 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
                     image_path=path
                     image_config['path']=path
                 if len(image_path) < 2 and not force:
-                    print(f"Stop!: path {image_path} does not feel correct. Please use another path or use --force to override")
-                    logger.error(f"IMPORT: Stop!: path {image_path} does not feel correct")
+                    print(f"STOP :: path {image_path} does not feel correct. Please use another path or use --force to override")
+                    logger.error(f"IMPORT: STOP :: path {image_path} does not feel correct")
                     exit(1)
                 if os.path.exists(image_path) and not force:
-                    print(f"Stop!: path {image_path} already exists. Please use another path or use --force to override")
-                    logger.error(f"IMPORT: Stop!: path {image_path} already exists")
+                    print(f"STOP :: path {image_path} already exists. Please use another path or use --force to override")
+                    logger.error(f"IMPORT: STOP :: path {image_path} already exists")
                     exit(1)
                 if os.path.exists(image_path):
                     shutil.rmtree(image_path)
@@ -533,8 +533,8 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
                 logger.info(f"image check: {r.status_code}")
                 status_code=str(r.status_code)
                 if status_code == '200' and not force:
-                    print(f"Stop!: osimage {image_name} already exists. Please use another name or use --force to override")
-                    logger.error(f"IMPORT: Stop!: osimage {image_name} already exists")
+                    print(f"STOP :: osimage {image_name} already exists. Please use another name or use --force to override")
+                    logger.error(f"IMPORT: STOP :: osimage {image_name} already exists")
                     exit(1)
                 r = requests.get(f'http://{CONF["ENDPOINT"]}/config/osimage/{image_name}/_delete', headers=headers)
                 logger.info(f"delete return: {r.status_code}")
@@ -546,29 +546,29 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
                 if status_code == '201':
                     ret=unpack_image(name=image_name,path=image_path,image_file=image_file)
                     if not ret:
-                        logger.error(f"IMPORT: Encountered a problem exporting osimage")
-                        print("Encountered a problem exporting osimage")
+                        logger.error(f"IMPORT: ERROR :: Encountered a problem exporting osimage")
+                        print("ERROR :: Encountered a problem exporting osimage")
                         exit(4)
                 else:
-                    print(f"Error processing request: {r.text}")
-                    logger.error(f"IMPORT: Error processing request: {r.text}")
+                    print(f"ERROR :: trouble processing request: {r.text}")
+                    logger.error(f"IMPORT: ERROR :: Error processing request: {r.text}")
                     exit(2)
                 print(f"finished importing {image_name}")
                 exit(0)
    
             except requests.exceptions.HTTPError as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
             except requests.exceptions.ConnectionError as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
             except requests.exceptions.Timeout as err:
-                print("Error: trouble getting results: "+str(err))
+                print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
     else:
-        print("Error: not enough parameters to run with")
+        print("ERROR :: not enough parameters to run with")
         exit(2)
 
 # ----------------------------------------------------------------------------
