@@ -18,9 +18,6 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>
 
 
-"""
-This file is the entry point for provisioning
-"""
 
 __author__      = 'Antoine Schonewille'
 __copyright__   = 'Copyright 2023, Luna2 Project'
@@ -30,7 +27,7 @@ __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
-#VERSION: 0.2.4
+#VERSION: 0.2.5
 
 import os
 import getpass
@@ -159,37 +156,39 @@ def main(argv):
     logger.info(f'User {getpass.getuser()} ran => {command}')
 
     NODES = None
-    GROUPS = None
-    INTERFACES = None
+    GROUP = None
+    RACK = None
     ACTION = None
     SUBSYSTEM = None
-    for i in range(0, len(argv)):
-        if (argv[i] == "-h" or argv[i] == "--help"):
+    if (len(argv) == 0):
+        call_help()
+        sys.exit()
+    while len(argv)>0:
+        item = argv.pop(0)
+        if (item == "-h" or item == "--help"):
             call_help()
-            sys.exit()
-        elif (argv[i] == "-g" or argv[i] == "--groups"):
-            i+=1
-            GROUPS=argv[i]
-        elif (argv[i] and not NODES):
-            NODES=argv[i]
-        elif (argv[i] in ['status','on','off','reset','cycle']):
-            ACTION=argv[i]
+            exit()
+        elif (item == "-g" or item == "--group"):
+            GROUP=argv.pop(0)
+        elif (item == "-r" or item == "--rack"):
+            RACK=argv.pop(0)
+        elif (item in ['status','on','off','reset','cycle']):
+            ACTION=item
             SUBSYSTEM='power'
-        elif (argv[i] in ['identify','noidentify']):
-            ACTION=argv[i]
+        elif (item in ['identify','noidentify']):
+            ACTION=item
             SUBSYSTEM='chassis'
+        elif item and not NODES:
+            NODES=item
         else:
             print("Error: Invalid options used.")
             call_help()
             sys.exit()
-    if (len(argv) == 0):
-        call_help()
-        sys.exit()
-    if ((NODES is None) or (ACTION is None)):
+    if (NODES is None and GROUP is None and RACK is None) or (ACTION is None):
         print("Error: Instruction incomplete. Nodes and Task expected.")
         call_help()
         sys.exit()
-    handleRequest(nodes=NODES,groups=GROUPS,subsystem=SUBSYSTEM,action=ACTION)
+    handleRequest(nodes=NODES,group=GROUP,rack=RACK,subsystem=SUBSYSTEM,action=ACTION)
     sys.exit()
 
 # ============================================================================
@@ -199,20 +198,23 @@ def call_help():
     This method will provide a Help Menu.
     """
     print("""
-usage: lpower [-h] [--interface INTERFACE]
+usage: lpower [-h] [--rack|-r RACKNAME] [--group|-g GROUP]
               [hosts] {status,on,off,reset,cycle,identify,noidentify}
 
 BMC power management.
 
 positional arguments:
-  hosts                 Host list
+  hosts                     Host list. Any combination of: 
+                               node[x-y],
+                               nodex,nodey,...
+                               nodex
   {status,on,off,reset,cycle,identify,noidentify}
-                        Action
+                            Action
 
 optional arguments:
-  -h, --help            show this help message and exit
-  --interface INTERFACE, -i INTERFACE
-                        Interface to use instead of "BMC"
+  -h, --help                show this help message and exit
+  -g GROUP, --group GROUP   perform the action on nodes of the group
+  -r RACK, --rack RACK      perform the action on nodes inside the rack
     """)
 
 
@@ -298,9 +300,96 @@ def getToken():
 #        exit(3)
     
 
+def get_group_nodes(group=None):
+    if group:
+        if ('TOKEN' not in CONF):
+            getToken()
+        if ('ENDPOINT' not in CONF):
+            read_ini()
+        RET = {'400': 'invalid request', '404': 'group name invalid', '401': 'action not authorized', '503': 'service not available'}
+        headers = {'x-access-tokens': CONF['TOKEN']}
+        try:
+            r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/group/{group}/_member', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
+            status_code=str(r.status_code)
+            if (status_code == "200"):
+                if (r.text):
+                    DATA=json.loads(r.text)
+                    try:
+                        nodelist=DATA['config']['group'][group]['members']
+                        nodes=','.join(nodelist)
+                        return nodes
+                    except Exception as exp:
+                        print(f'ERROR :: returned unrecognized format while fetching nodes in group')
+                        sys.exit(3)
+            elif (status_code in RET):
+                print(f"ERROR :: {group} failed: {RET[status_code]}")
+                sys.exit(3)
+            else:
+                # when we don't know how to handle the returned data
+                print(f"ERROR :: [{status_code}]: {r.text}")
+                sys.exit(3)
+        except requests.exceptions.SSLError as ssl_loop_error:
+            print(f'ERROR :: {ssl_loop_error}')
+            sys.exit(3)
+        except Exception as exp:
+            print(f'ERROR :: {exp}')
+            sys.exit(3)
+
+def get_rack_nodes(rack=None):
+    if rack:
+        if ('TOKEN' not in CONF):
+            getToken()
+        if ('ENDPOINT' not in CONF):
+            read_ini()
+        RET = {'400': 'invalid request', '404': 'rack name invalid', '401': 'action not authorized', '503': 'service not available'}
+        headers = {'x-access-tokens': CONF['TOKEN']}
+        try:
+            r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/rack/{rack}', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
+            status_code=str(r.status_code)
+            if (status_code == "200"):
+                if (r.text):
+                    DATA=json.loads(r.text)
+                    try:
+                        devicelist=DATA['config']['rack'][rack]['devices']
+                        nodelist=[]
+                        for device in devicelist:
+                            if device['type'] == 'node':
+                                nodelist.append(device['name'])
+                        nodes=','.join(nodelist)
+                        return nodes
+                    except Exception as exp:
+                        print(f'ERROR :: returned unrecognized format while fetching nodes in rack')
+                        sys.exit(3)
+            elif (status_code in RET):
+                print(f"ERROR :: {rack} failed: {RET[status_code]}")
+                sys.exit(3)
+            else:
+                # when we don't know how to handle the returned data
+                print(f"ERROR :: [{status_code}]: {r.text}")
+                sys.exit(3)
+        except requests.exceptions.SSLError as ssl_loop_error:
+            print(f'ERROR :: {ssl_loop_error}')
+            sys.exit(3)
+        except Exception as exp:
+            print(f'ERROR :: {exp}')
+            sys.exit(3)
+
+
 # ----------------------------------------------------------------------------
 
-def handleRequest(nodes=None ,groups=None, interface=None, subsystem=None, action=None):
+def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None):
+    if group:
+        group_nodes = get_group_nodes(group)
+        if not nodes:
+            nodes=group_nodes
+        else:
+            nodes+=','+group_nodes
+    if rack:
+        rack_nodes = get_rack_nodes(rack)
+        if not nodes:
+            nodes=rack_nodes
+        else:
+            nodes+=','+rack_nodes
     if ((not nodes is None) and (not action is None)):
         if ('TOKEN' not in CONF):
             getToken()
@@ -330,7 +419,7 @@ def handleRequest(nodes=None ,groups=None, interface=None, subsystem=None, actio
                     print(nodes+": "+str(DATA['control']['power'] or 'no results returned'))
                 else:
                     # when we don't know how to handle the returned data
-                    print("["+status_code+'] ::: '+r.text)
+                    print(f"ERROR :: [{status_code}]: {r.text}")
             except requests.exceptions.SSLError as ssl_loop_error:
                 print(f'ERROR :: {ssl_loop_error}')
                 sys.exit(3)
