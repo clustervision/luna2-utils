@@ -458,6 +458,8 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
                         image_config=raw_config['config']['osimage'][name]
                         if 'assigned_tags' in image_config:
                             del image_config['assigned_tags']
+                        if 'tag' in image_config:
+                            del image_config['tag']
                         if config_file: # Matthew mode
                             if os.path.exists(config_file) and not force:
                                 print(f"STOP :: {config_file} already exists. Please use another name or use --force to override")
