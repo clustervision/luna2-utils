@@ -442,7 +442,7 @@ class LCluster():
         elif text == 'idle':
             text = colored('IDLE', 'green')
         else:
-            text = colored(text, 'blue')
+            text = colored(text, 'light_blue')
         return text
 
 
