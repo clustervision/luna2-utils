@@ -20,7 +20,13 @@ import re
 import json
 from time import sleep
 
-CONF={}
+from imports.Log import Log
+from imports.Ini import Ini
+from imports.Token import Token
+
+logger = Log.init_log(log_file='/var/log/luna/lmaster.log',log_level='info')
+CONF = Ini.read_ini(ini_file='/trinity/local/luna/utils/config/luna.ini')
+
 requests.packages.urllib3.disable_warnings()
 
 # ============================================================================
@@ -58,75 +64,12 @@ optional arguments:
 
 # ----------------------------------------------------------------------------
 
-def readConfigFile():
-    read=0
-    api = re.compile("^(\[API\])")
-    regex = re.compile("^(.[^=]+)\s+?=\s+?(.*)$")
-    try:
-        with open("/trinity/local/luna/cli/config/luna.ini") as f:
-            for line in f:
-                if (not read):
-                    result = api.match(line)
-                    if (result):
-                        read=1
-                else:
-                    result = regex.match(line)
-                    if (result):
-                        CONF[result.group(1)]=result.group(2)
-        CONF["VERIFY_CERTIFICATE"] = True if CONF["VERIFY_CERTIFICATE"].lower() in ['y', 'yes', 'true']  else False
-    except:
-        print("Error: /trinity/local/luna/cli/config/luna.ini Does not exist and i cannot continue.")
-        exit(1)
-
-    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
-        print("Error: username/password/endpoint not found in config file. i cannot continue.")
-        exit(2)
-
-# ----------------------------------------------------------------------------
-
-def getToken():
-    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
-        readConfigFile()
-
-    RET={'401': 'invalid credentials', '400': 'bad request'}
-
-    token_credentials = {'username': CONF['USERNAME'],'password': CONF['PASSWORD']}
-    try:
-        x = requests.post(CONF["PROTOCOL"]+'://'+CONF["ENDPOINT"]+'/token', json = token_credentials, verify=CONF["VERIFY_CERTIFICATE"])
-        if (str(x.status_code) in RET):
-            print("Error: "+RET[str(x.status_code)])
-            exit(4)
-        DATA=json.loads(x.text)
-        if (not 'token' in DATA):
-            print("Error: i did not receive a token. i cannot continue.")
-            exit(5)
-        CONF["TOKEN"]=DATA["token"]
-    except requests.exceptions.HTTPError as err:
-        print("Error: trouble getting my token: "+str(err))
-        exit(3)
-    except requests.exceptions.ConnectionError as err:
-        print("Error: trouble getting my token: "+str(err))
-        exit(3)
-    except requests.exceptions.Timeout as err:
-        print("Error: trouble getting my token: "+str(err))
-        exit(3)
-#    Below commented out as this catch all will also catch legit responses for e.g. 401 and 404
-#    except:
-#        print("Error: trouble getting my token for unknown reasons.")
-#        exit(3)
-    
-
-# ----------------------------------------------------------------------------
 
 def handleRequest(nodes=None,groups=None,interface=None,action=None):
     if (True):
-        if ('TOKEN' not in CONF):
-            getToken()
-        if ('ENDPOINT' not in CONF):
-            readConfigFile()
+        CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
 
         RET={'400': 'invalid request', '404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
-
         headers = {'x-access-tokens': CONF['TOKEN']}
 
         url_string = None
