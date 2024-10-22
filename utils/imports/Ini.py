@@ -4,14 +4,13 @@ from configparser import RawConfigParser
 
 class Ini:
     """
-    This Log Class is responsible for reading and parsing the luna.ini file.
+    This Ini Class is responsible for reading and parsing the luna.ini file.
     """
-    __logger = None
 
     @classmethod
     def get_option(ini, parser=None, errors=None,  section=None, option=None):
         """
-        This method will retrieve the value from the INI
+        This method will retrieve the value from the INI section
         """
         response = False
         if parser.has_option(section, option):
@@ -23,7 +22,7 @@ class Ini:
 
     @classmethod
     def read_ini(ini, ini_file=None):
-        CONF, errors = {}, []
+        config, errors = {}, []
         username, password, daemon, secret_key, protocol, security = None, None, None, None, None, ''
         file_check = os.path.isfile(ini_file)
         read_check = os.access(ini_file, os.R_OK)
@@ -32,10 +31,10 @@ class Ini:
             configparser.read(ini_file)
             if configparser.has_section('API'):
                 for item in ['username','password','protocol','endpoint']:
-                    CONF[item.upper()], errors = ini.get_option(configparser, errors,  'API', item.upper())
+                    config[item.upper()], errors = ini.get_option(configparser, errors,  'API', item.upper())
                 secret_key, _ = ini.get_option(configparser, errors,  'API', 'SECRET_KEY')
                 security, _ = ini.get_option(configparser, errors,  'API', 'VERIFY_CERTIFICATE')
-                CONF["VERIFY_CERTIFICATE"] = True if security.lower() in ['y', 'yes', 'true']  else False
+                config["VERIFY_CERTIFICATE"] = True if security.lower() in ['y', 'yes', 'true']  else False
             else:
                 errors.append(f'API section is not found in {ini_file}.')
         else:
@@ -46,4 +45,4 @@ class Ini:
             for error in errors:
                 sys.stderr.write(f'{num}. {error}\n')
             sys.exit(1)
-        return CONF
+        return config
