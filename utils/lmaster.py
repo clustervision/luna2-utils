@@ -138,9 +138,13 @@ def handleRequest(action=None):
                         if 'comment' in message[controller]:
                             print(f"{controller}: {message[controller]['comment']}".ljust(30), end=" ")
                         if 'ha' in message[controller]:
-                            for item in ['enabled','master','insync']:
+                            for item in ['enabled','master','insync','syncimages','overrule']:
                                 if item in message[controller]['ha']:
-                                    print(f"{item}: {message[controller]['ha'][item]}".ljust(15), end=" ")
+                                    print(f"{item}: {message[controller]['ha'][item]}".ljust(len(item)+8), end=" ")
+                        if 'config' in message[controller]:
+                            for item in ['shadow','beacon']:
+                                if item in message[controller]['config']:
+                                    print(f"{item}: {message[controller]['config'][item]}".ljust(len(item)+8), end=" ")
                         print("")
                 else:
                     print (message or r.text)
