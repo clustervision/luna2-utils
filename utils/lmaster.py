@@ -114,13 +114,16 @@ def handleRequest(action=None):
                     if len(message.keys()) < 2:
                         print("Cluster not configured for HA")
                         exit(0)
+                    MASTERFOUND=False
                     for controller in message.keys():
                         if 'comment' in message[controller]:
                             print(f"{controller}: {message[controller]['comment']}")
-                        elif 'ha' in message[controller] and 'master' in message[controller]['ha'] and message[controller]['ha']['master']:
-                            print(f"{controller} is the master")
-                else:
-                    print (message or r.text)
+                        elif 'ha' in message[controller] and 'master' in message[controller]['ha']:
+                            if message[controller]['ha']['master']:
+                                print(f"{controller} is the master")
+                                MASTERFOUND=True
+                    if not MASTERFOUND:
+                        print(f"No master configured or using a shadow controller as endpoint")
             elif (action == "all"):
                 if isinstance(message, dict):
                     if len(message.keys()) < 2:
