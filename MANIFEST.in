@@ -2,6 +2,7 @@ include requirements.txt
 include VERSION.txt
 include README.md
 include utils/*
+include utils/utils/*.py
 include utils/lchroot
 include utils/bootutil.tclsh
 include utils/slurm.ini
