@@ -68,8 +68,6 @@ optional arguments:
 
 # ----------------------------------------------------------------------------
 
-TRY=True
-
 def handleRequest(action=None):
     CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
 
