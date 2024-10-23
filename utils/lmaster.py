@@ -128,14 +128,18 @@ def handleRequest(action=None):
                     if len(message.keys()) < 2:
                         print("Cluster not configured for HA")
                         exit(0)
+                    maxlength=0
                     for controller in message.keys():
-                        print(f"{controller}:", end=" ")
+                        if len(controller) > maxlength:
+                            maxlength=len(controller)
+                    for controller in message.keys():
+                        print(f"{controller}:".ljust(maxlength+3), end=" ")
                         if 'comment' in message[controller]:
-                            print(f"{controller}: {message[controller]['comment']}", end=", ")
+                            print(f"{controller}: {message[controller]['comment']}".ljust(30), end=" ")
                         if 'ha' in message[controller]:
                             for item in ['enabled','master','insync']:
                                 if item in message[controller]['ha']:
-                                    print(f"{item}: {message[controller]['ha'][item]}", end=", ")
+                                    print(f"{item}: {message[controller]['ha'][item]}".ljust(15), end=" ")
                         print("")
                 else:
                     print (message or r.text)
