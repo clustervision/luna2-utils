@@ -46,9 +46,9 @@ from requests import Session
 from requests.adapters import HTTPAdapter
 import urllib3
 from urllib3.util import Retry
-from imports.Log import Log
-from imports.Ini import Ini
-from imports.Token import Token
+from utils.log import Log
+from utils.ini import Ini
+from utils.token import Token
 
 TMP_DIR='/tmp'
 
