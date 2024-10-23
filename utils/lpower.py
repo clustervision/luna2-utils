@@ -43,91 +43,12 @@ from requests.adapters import HTTPAdapter
 import urllib3
 from urllib3.util import Retry
 
-import logging
-LOG_DIR = '/var/log/luna'
-LOG_FILE = '/var/log/luna/lpower.log'
+from utils.log import Log
+from utils.ini import Ini
+from utils.token import Token
 
-def log_checker():
-    """
-    This method will check if the log file is in place or not.
-    If not then will create it.
-    """
-    if os.path.exists(LOG_DIR) is False:
-        try:
-            os.makedirs(LOG_DIR)
-            sys.stdout.write(f'PASS :: {LOG_DIR} is created.\n')
-        except PermissionError:
-            sys.stderr.write('ERROR :: Install this tool as a super user.\n')
-
-
-class Log:
-    """
-    This Log Class is responsible to start the Logger depend on the Level.
-    """
-    __logger = None
-
-
-    @classmethod
-    def init_log(cls, log_level=None):
-        """
-        Input - log_level
-        Process - Validate the Log Level, Set it to INFO if not correct.
-        Output - Logger Object.
-        """
-        levels = {'NOTSET': 0, 'DEBUG': 10, 'INFO': 20, 'WARNING': 30, 'ERROR': 40, 'CRITICAL': 50}
-        log_level = levels[log_level.upper()]
-        thread_level = '[%(levelname)s]:[%(asctime)s]:[%(threadName)s]:'
-        message = '[%(filename)s:%(funcName)s@%(lineno)d] - %(message)s'
-        log_format = f'{thread_level}{message}'
-        try:
-            logging.basicConfig(filename=LOG_FILE, format=log_format, filemode='a', level=log_level)
-            cls.__logger = logging.getLogger('luna2-cli')
-            cls.__logger.setLevel(log_level)
-            if log_level == 10:
-                formatter = logging.Formatter(log_format)
-                console = logging.StreamHandler(sys.stdout)
-                console.setLevel(log_level)
-                console.setFormatter(formatter)
-                cls.__logger.addHandler(console)
-            levels = {0:'NOTSET', 10: 'DEBUG', 20: 'INFO', 30: 'WARNING', 40:'ERROR', 50:'CRITICAL'}
-            # cls.__logger.info(f'####### Luna Logging Level IsSet To [{levels[log_level]}] ########')
-            return cls.__logger
-        except PermissionError:
-            sys.stderr.write('ERROR :: Run this tool as a super user.\n')
-            sys.exit(1)
-
-
-    @classmethod
-    def get_logger(cls):
-        """
-        Input - None
-        Output - Logger Object.
-        """
-        return cls.__logger
-
-
-    @classmethod
-    def set_logger(cls, log_level=None):
-        """
-        Input - None
-        Process - Update the existing Log Level
-        Output - Logger Object.
-        """
-        levels = {'NOTSET': 0, 'DEBUG': 10, 'INFO': 20, 'WARNING': 30, 'ERROR': 40, 'CRITICAL': 50}
-        log_level = levels[log_level.upper()]
-        cls.__logger.setLevel(log_level)
-        return cls.__logger
-
-
-    @classmethod
-    def check_loglevel(cls):
-        """
-        Input - None
-        Process - Update the existing Log Level
-        Output - Logger Object.
-        """
-        return logging.root.level
-
+logger = Log.init_log(log_file='/var/log/luna/lpower.log',log_level='info')
+CONF = Ini.read_ini(ini_file='/trinity/local/luna/utils/config/luna.ini')
 
 urllib3.disable_warnings()
 session = Session()
@@ -138,9 +59,6 @@ retries = Retry(
     allowed_methods = {'GET', 'POST'}
 )
 session.mount('https://', HTTPAdapter(max_retries=retries))
-field_check = ['USERNAME', 'PASSWORD', 'ENDPOINT', 'PROTOCOL', 'VERIFY_CERTIFICATE']
-INI_FILE = '/trinity/local/luna/utils/config/luna.ini'
-CONF = {}
 
 # ============================================================================
 
@@ -148,8 +66,6 @@ def main(argv):
     """
     The main method to initiate the script.
     """
-    log_checker()
-    logger = Log.init_log('info')
     command = sys.argv
     command[0] = 'lpower'
     command = ' '.join(command)
@@ -217,95 +133,11 @@ optional arguments:
   -r RACK, --rack RACK      perform the action on nodes inside the rack
     """)
 
-
 # ----------------------------------------------------------------------------
-def get_option(parser=None, errors=None,  section=None, option=None):
-    """
-    This method will retrieve the value from the INI
-    """
-    response = False
-    if parser.has_option(section, option):
-        response = parser.get(section, option)
-    else:
-        errors.append(f'{option} is not found in {section} section in {INI_FILE}.')
-    return response, errors
-
-
-def read_ini():
-
-    errors = []
-    username, password, daemon, secret_key, protocol, security = None, None, None, None, None, ''
-    file_check = os.path.isfile(INI_FILE)
-    read_check = os.access(INI_FILE, os.R_OK)
-    if file_check and read_check:
-        configparser = RawConfigParser()
-        configparser.read(INI_FILE)
-        if configparser.has_section('API'):
-            CONF['USERNAME'], errors = get_option(configparser, errors,  'API', 'USERNAME')
-            CONF['PASSWORD'], errors = get_option(configparser, errors,  'API', 'PASSWORD')
-            secret_key, errors = get_option(configparser, errors,  'API', 'SECRET_KEY')
-            CONF['PROTOCOL'], errors = get_option(configparser, errors,  'API', 'PROTOCOL')
-            CONF['ENDPOINT'], errors = get_option(configparser, errors,  'API', 'ENDPOINT')
-            security, errors = get_option(configparser, errors,  'API', 'VERIFY_CERTIFICATE')
-            CONF["VERIFY_CERTIFICATE"] = True if security.lower() in ['y', 'yes', 'true']  else False
-        else:
-            errors.append(f'API section is not found in {INI_FILE}.')
-    else:
-        errors.append(f'{INI_FILE} is not found on this machine.')
-    if errors:
-        sys.stderr.write('You need to fix following errors...\n')
-        num = 1
-        for error in errors:
-            sys.stderr.write(f'{num}. {error}\n')
-        sys.exit(1)
-    return CONF
-
-# ----------------------------------------------------------------------------
-
-def getToken():
-    """
-    This method will retrieve the token.
-    """
-    if not all(key in CONF for key in field_check):
-        read_ini()
-
-    RET = {'401': 'invalid credentials', '400': 'bad request'}
-
-    token_credentials = {'username': CONF['USERNAME'], 'password': CONF['PASSWORD']}
-    try:
-        x = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/token', json=token_credentials, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
-        if (str(x.status_code) in RET):
-            print("Error: "+RET[str(x.status_code)])
-            sys.exit(4)
-        DATA = json.loads(x.text)
-        if (not 'token' in DATA):
-            print("Error: i did not receive a token. i cannot continue.")
-            sys.exit(5)
-        CONF["TOKEN"]=DATA["token"]
-    except requests.exceptions.SSLError as ssl_loop_error:
-        print(f'ERROR :: {ssl_loop_error}')
-        sys.exit(3)
-    except requests.exceptions.HTTPError as err:
-        print("Error: trouble getting my token: "+str(err))
-        sys.exit(3)
-    except requests.exceptions.ConnectionError as err:
-        print("Error: trouble getting my token: "+str(err))
-        sys.exit(3)
-    except requests.exceptions.Timeout as err:
-        print("Error: trouble getting my token: "+str(err))
-        sys.exit(3)
-#    Below commented out as this catch all will also catch legit responses for e.g. 401 and 404
-#    except:
-#        print("Error: trouble getting my token for unknown reasons.")
-#        exit(3)
-    
 
 def get_group_nodes(group=None):
     if group:
-        if ('TOKEN' not in CONF):
-            getToken()
-        if ('ENDPOINT' not in CONF):
-            read_ini()
+        CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
         RET = {'400': 'invalid request', '404': 'group name invalid', '401': 'action not authorized', '503': 'service not available'}
         headers = {'x-access-tokens': CONF['TOKEN']}
         try:
@@ -337,10 +169,7 @@ def get_group_nodes(group=None):
 
 def get_rack_nodes(rack=None):
     if rack:
-        if ('TOKEN' not in CONF):
-            getToken()
-        if ('ENDPOINT' not in CONF):
-            read_ini()
+        CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
         RET = {'400': 'invalid request', '404': 'rack name invalid', '401': 'action not authorized', '503': 'service not available'}
         headers = {'x-access-tokens': CONF['TOKEN']}
         try:
@@ -391,13 +220,9 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
         else:
             nodes+=','+rack_nodes
     if ((not nodes is None) and (not action is None)):
-        if ('TOKEN' not in CONF):
-            getToken()
-        if ('ENDPOINT' not in CONF):
-            read_ini()
+        CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
 
         RET = {'400': 'invalid request', '404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
-
         headers = {'x-access-tokens': CONF['TOKEN']}
 
         regex = re.compile("^([a-zA-Z0-9_]+)$")

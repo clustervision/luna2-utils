@@ -20,7 +20,13 @@ import re
 import json
 from time import sleep
 
-CONF={}
+from utils.log import Log
+from utils.ini import Ini
+from utils.token import Token
+
+logger = Log.init_log(log_file='/var/log/luna/lmaster.log',log_level='info')
+CONF = Ini.read_ini(ini_file='/trinity/local/luna/utils/config/luna.ini')
+
 requests.packages.urllib3.disable_warnings()
 
 # ============================================================================
@@ -34,10 +40,12 @@ def main(argv):
             ACTION="set"
         elif (argv[i] == "-w" or argv[i] == "--who"):
             ACTION="who"
+        elif (argv[i] == "-a" or argv[i] == "--all"):
+            ACTION="all"
         else:
-            ACTION="status"
+            ACTION="who"
     if (len(argv) == 0):
-        ACTION="status"
+        ACTION="who"
     handleRequest(action=ACTION)
     exit()
 
@@ -45,113 +53,117 @@ def main(argv):
 
 def callHelp():
     print ("""
-usage: lmaster [-h|-s|-w]
+usage: lmaster [-h|-s|-w|-a]
 
-Gets Luna2 master state of controller, based on cli luna.ini config
+Gets Luna2 master state of controller, based on utils luna.ini config
 
 optional arguments:
   -h, --help            show this help message and exit
-  -s, --set             sets master state
+  -s, --set             sets master state for controller configured as endpoint in luna.ini
+                        in most cases it's the controller where this command is invoked
   -w, --who             tells who of the controllers is master
+  -a, --all             returns current HA values of all controllers
     """)
 
 
 # ----------------------------------------------------------------------------
 
-def readConfigFile():
-    read=0
-    api = re.compile("^(\[API\])")
-    regex = re.compile("^(.[^=]+)\s+?=\s+?(.*)$")
-    try:
-        with open("/trinity/local/luna/cli/config/luna.ini") as f:
-            for line in f:
-                if (not read):
-                    result = api.match(line)
-                    if (result):
-                        read=1
+def handleRequest(action=None):
+    CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
+
+    RET={'400': 'invalid request', '404': 'invalid url or API endpoint', '401': 'action not authorized', '503': 'service not available'}
+    headers = {'x-access-tokens': CONF['TOKEN']}
+
+    url_string = None
+    if (action == "set"):
+        url_string = f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/ha/master/_set'
+    elif (action == "who" or action == "all"):
+        url_string = f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/ha/controllers'
+    elif (action == "master"):
+        url_string = f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/ha/master'
+    if url_string:
+        try:
+            r = requests.get(url_string,headers=headers,verify=CONF["VERIFY_CERTIFICATE"])
+            status_code=str(r.status_code)
+            message=None
+            if status_code in RET:
+                if (action == "who" and retry()):
+                    handleRequest(action="master")
+                    return
                 else:
-                    result = regex.match(line)
-                    if (result):
-                        CONF[result.group(1)]=result.group(2)
-        CONF["VERIFY_CERTIFICATE"] = True if CONF["VERIFY_CERTIFICATE"].lower() in ['y', 'yes', 'true']  else False
-    except:
-        print("Error: /trinity/local/luna/cli/config/luna.ini Does not exist and i cannot continue.")
-        exit(1)
+                    print(f'[{status_code}] ::: {RET[status_code]}')
+                    exit(1)
+            if len(r.text) == 0:
+                print(f'[{status_code}] ::: Nothing received from controller')
+                exit(1)
+            if isinstance(r.text, str):
+                DATA=json.loads(r.text)
+                if 'message' in DATA:
+                    message=DATA['message']
+            host,*_ = CONF["ENDPOINT"].split(':')
+            print(f"Configured endpoint is {host}")
+            if (action == "set"):
+                print (message or r.text)
+            elif (action == "master"):
+                if message:
+                    print(f'{host} is the master')
+                else:
+                    print(f'{host} is not the master')
+            elif (action == "who"):
+                if isinstance(message, dict):
+                    if len(message.keys()) < 2:
+                        print("Cluster not configured for HA")
+                        exit(0)
+                    MASTERFOUND=False
+                    for controller in message.keys():
+                        if 'comment' in message[controller]:
+                            print(f"{controller}: {message[controller]['comment']}")
+                        elif 'ha' in message[controller] and 'master' in message[controller]['ha']:
+                            if message[controller]['ha']['master']:
+                                print(f"{controller} is the master")
+                                MASTERFOUND=True
+                    if not MASTERFOUND:
+                        print(f"No master configured or using a shadow controller as endpoint")
+            elif (action == "all"):
+                if isinstance(message, dict):
+                    if len(message.keys()) < 2:
+                        print("Cluster not configured for HA")
+                        exit(0)
+                    maxlength=0
+                    for controller in message.keys():
+                        if len(controller) > maxlength:
+                            maxlength=len(controller)
+                    for controller in message.keys():
+                        print(f"{controller}:".ljust(maxlength+3), end=" ")
+                        if 'comment' in message[controller]:
+                            print(f"{controller}: {message[controller]['comment']}".ljust(30), end=" ")
+                        if 'ha' in message[controller]:
+                            for item in ['enabled','master','insync']:
+                                if item in message[controller]['ha']:
+                                    print(f"{item}: {message[controller]['ha'][item]}".ljust(15), end=" ")
+                        print("")
+                else:
+                    print (message or r.text)
+        except requests.exceptions.HTTPError as err:
+            print("Error: trouble getting results: "+str(err))
+            exit(3)
+        except requests.exceptions.ConnectionError as err:
+            print("Error: trouble getting results: "+str(err))
+            exit(3)
+        except requests.exceptions.Timeout as err:
+            print("Error: trouble getting results: "+str(err))
+            exit(3)
+        except Exception as exp:
+            exc_type, exc_obj, exc_tb = sys.exc_info()
+            print(f"{exp}, {exc_type}, in {exc_tb.tb_lineno}")
 
-    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
-        print("Error: username/password/endpoint not found in config file. i cannot continue.")
-        exit(2)
-
-# ----------------------------------------------------------------------------
-
-def getToken():
-    if (('USERNAME' not in CONF) or ('PASSWORD' not in CONF) or ('ENDPOINT' not in CONF)):
-        readConfigFile()
-
-    RET={'401': 'invalid credentials', '400': 'bad request'}
-
-    token_credentials = {'username': CONF['USERNAME'],'password': CONF['PASSWORD']}
-    try:
-        x = requests.post(CONF["PROTOCOL"]+'://'+CONF["ENDPOINT"]+'/token', json = token_credentials, verify=CONF["VERIFY_CERTIFICATE"])
-        if (str(x.status_code) in RET):
-            print("Error: "+RET[str(x.status_code)])
-            exit(4)
-        DATA=json.loads(x.text)
-        if (not 'token' in DATA):
-            print("Error: i did not receive a token. i cannot continue.")
-            exit(5)
-        CONF["TOKEN"]=DATA["token"]
-    except requests.exceptions.HTTPError as err:
-        print("Error: trouble getting my token: "+str(err))
-        exit(3)
-    except requests.exceptions.ConnectionError as err:
-        print("Error: trouble getting my token: "+str(err))
-        exit(3)
-    except requests.exceptions.Timeout as err:
-        print("Error: trouble getting my token: "+str(err))
-        exit(3)
-#    Below commented out as this catch all will also catch legit responses for e.g. 401 and 404
-#    except:
-#        print("Error: trouble getting my token for unknown reasons.")
-#        exit(3)
-    
-
-# ----------------------------------------------------------------------------
-
-def handleRequest(nodes=None,groups=None,interface=None,action=None):
-    if (True):
-        if ('TOKEN' not in CONF):
-            getToken()
-        if ('ENDPOINT' not in CONF):
-            readConfigFile()
-
-        RET={'400': 'invalid request', '404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
-
-        headers = {'x-access-tokens': CONF['TOKEN']}
-
-        url_string = None
-        if (action == "set"):
-            url_string = f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/ha/master/_set'
-        elif (action == "who"):
-            url_string = f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/ha/master/_who'
-        elif (action == "status"):
-            url_string = f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/ha/master'
-        if url_string:
-            try:
-                r = requests.get(url_string,headers=headers,verify=CONF["VERIFY_CERTIFICATE"])
-                status_code=str(r.status_code)
-                print("["+status_code+'] ::: '+r.text)
-            except requests.exceptions.HTTPError as err:
-                print("Error: trouble getting results: "+str(err))
-                exit(3)
-            except requests.exceptions.ConnectionError as err:
-                print("Error: trouble getting results: "+str(err))
-                exit(3)
-            except requests.exceptions.Timeout as err:
-                print("Error: trouble getting results: "+str(err))
-                exit(3)
-    else:
-        print("Error: not enough parameters to run with")
+RETRY=True
+def retry():
+    global RETRY
+    if RETRY:
+        RETRY=False
+        return True
+    return False
 
 # ----------------------------------------------------------------------------
 
