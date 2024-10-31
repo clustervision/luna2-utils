@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/trinity/local/python/bin/python3
 # -*- coding: utf-8 -*-
 
 """
@@ -20,9 +20,9 @@ import re
 import json
 from time import sleep
 
-from utils.log import Log
-from utils.ini import Ini
-from utils.token import Token
+from utils.utils.log import Log
+from utils.utils.ini import Ini
+from utils.utils.token import Token
 
 logger = Log.init_log(log_file='/var/log/luna/lmaster.log',log_level='info')
 CONF = Ini.read_ini(ini_file='/trinity/local/luna/utils/config/luna.ini')
