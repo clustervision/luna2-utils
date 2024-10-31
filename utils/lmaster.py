@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/trinity/local/python/bin/python3
 # -*- coding: utf-8 -*-
 
 """
