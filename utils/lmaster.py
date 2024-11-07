@@ -120,8 +120,11 @@ def handleRequest(action=None):
                             print(f"{controller}: {message[controller]['comment']}")
                         elif 'ha' in message[controller] and 'master' in message[controller]['ha']:
                             if message[controller]['ha']['master']:
-                                print(f"{controller} is the master")
-                                MASTERFOUND=True
+                                if 'insync' in message[controller]['ha'] and not message[controller]['ha']['insync']:
+                                    print(f"{controller} is not in sync")
+                                else:
+                                    print(f"{controller} is the master")
+                                    MASTERFOUND=True
                     if not MASTERFOUND:
                         print(f"No master configured or using a shadow controller as endpoint")
             elif (action == "all"):
