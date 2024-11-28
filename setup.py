@@ -88,7 +88,7 @@ setup(
     url = "https://gitlab.taurusgroup.one/clustervision/luna2-utils.git",
     download_url = f"https://{PRE}@gitlab.taurusgroup.one/api/v4/projects/14/packages/pypi/simple",
     # packages = find_packages(),
-    packages = ['utils', 'data'],
+    packages = ['utils'],
     license = "MIT",
     keywords = [
         "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "slurm", "Trinity",
@@ -101,7 +101,6 @@ setup(
             'lpower = utils.lpower:main',
             'lcluster = utils.lcluster:main',
             'lslurm = utils.lslurm:main',
-            'limport = utils.limport:main',
             'lnode = utils.lnode:main',
             'trix-diag = utils.trinity_diagnosis:main'
         ]
