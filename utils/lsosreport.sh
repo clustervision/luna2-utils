@@ -75,7 +75,7 @@ function fetch_logs() {
 }
 
 function fetch_conf() {
-	for conffile in drbd drbd.d sssd slurm sudoers sudoers.d ssh dhcp named named.conf http nginx my.cnf my.cnf.d selinux; do
+	for conffile in drbd drbd.d sssd slurm sudoers sudoers.d ssh dhcp named named.conf http nginx my.cnf my.cnf.d selinux ood; do
 		echo "== conffiles $conffile =="
 		cp -arL /etc/$conffile $WORK/etc/ 2>&1
 	done
