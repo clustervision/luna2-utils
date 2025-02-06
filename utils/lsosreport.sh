@@ -155,11 +155,33 @@ function fetch_netstat() {
 	echo "== netstat =="
 	netstat -tulpen
 	echo
+	echo "== ss ltnp =="
+	ss -ltnp 2>&1
+	echo
+	echo "== ss lunp =="
+	ss -lunp 2>&1
+	echo
 }
 
 function fetch_trixdiag() {
 	echo "== trix diag =="
 	trix-diag 2>&1
+	echo
+}
+
+function fetch_packages() {
+	rpm -qa --last > package-list.dat
+}
+
+function fetch_mounts() {
+	echo "== fstab =="
+	cat /etc/fstab
+	echo
+	echo "== mount =="
+	mount
+	echo
+	echo "== proc/mount =="
+	cat /proc/mounts
 	echo
 }
 
@@ -218,6 +240,8 @@ fetch_firewallinfo
 fetch_netstat
 fetch_logs
 fetch_dmesg
+fetch_packages
+fetch_mounts
 fetch_clusterinfo
 fetch_trixdiag
 fetch_lunaha
