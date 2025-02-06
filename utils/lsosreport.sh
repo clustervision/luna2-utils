@@ -232,7 +232,7 @@ function fetch_lvm() {
 
 function fetch_zfs() {
 	echo "== zpool =="
-	zpool 2>&1
+	zpool status 2>&1
 	echo
 }
 
