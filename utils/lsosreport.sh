@@ -67,7 +67,7 @@ function fetch_processes() {
 }
 
 function fetch_logs() {
-	for logfile in messages luna pacemaker trinity.log sssd slurm httpd nginx ondemand-nginx my.cnf my.cnf.d; do
+	for logfile in messages luna pacemaker trinity.log sssd slurm httpd nginx ondemand-nginx; do
 		echo "== logfiles $logfile =="
 		cp -arL /var/log/$logfile $WORK/log/ 2>&1
 	done
@@ -75,9 +75,9 @@ function fetch_logs() {
 }
 
 function fetch_conf() {
-	for conffile in drbd drbd.d sssd slurm sudoers sudoers.d ssh dhcp named http nginx; do
+	for conffile in drbd drbd.d sssd slurm sudoers sudoers.d ssh dhcp named named.conf http nginx my.cnf my.cnf.d; do
 		echo "== conffiles $conffile =="
-		cp -arL /etc/$logfile $WORK/etc/ 2>&1
+		cp -arL /etc/$conffile $WORK/etc/ 2>&1
 	done
 	echo
 }
