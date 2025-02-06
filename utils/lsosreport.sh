@@ -75,7 +75,7 @@ function fetch_logs() {
 }
 
 function fetch_conf() {
-	for conffile in drbd drbd.d sssd slurm sudoers sudoers.d ssh dhcp named named.conf http nginx my.cnf my.cnf.d; do
+	for conffile in drbd drbd.d sssd slurm sudoers sudoers.d ssh dhcp named named.conf http nginx my.cnf my.cnf.d selinux; do
 		echo "== conffiles $conffile =="
 		cp -arL /etc/$conffile $WORK/etc/ 2>&1
 	done
@@ -103,11 +103,13 @@ function fetch_dmesg() {
 }
 
 function fetch_clusterinfo() {
+	echo "== lexport =="
 	PROJ=$(cat /trinity/site 2> /dev/null || cat /etc/trinityx-site 2> /dev/null || echo 'unknown')
 	if [ -f cluster-conf-${PROJ}.dat ]; then
 		rm -f cluster-conf-${PROJ}.dat
 	fi
 	lexport -c -e cluster-conf-${PROJ}.dat 2>&1
+	echo
 }
 
 function fetch_trixrelease() {
@@ -115,14 +117,21 @@ function fetch_trixrelease() {
 	cat /etc/trinityx-release 2> /dev/null || echo "trix release not found"
 }
 
-function fetch_osinfo() {
-	echo "== OS info =="
-	cat /etc/redhat-release 2> /dev/null
-	cat /etc/lsb-release 2> /dev/null
-	echo
+function fetch_uptime() {
 	echo -n "== uptime: "
 	uptime
-	echo
+}
+
+function fetch_osinfo() {
+	echo -n "== OS info: "
+	rel=$(cat /etc/redhat-release 2> /dev/null)
+	if [ ! "$rel" ]; then
+		echo
+		cat /etc/lsb-release 2> /dev/null
+		echo
+	else
+		echo $rel
+	fi
 }
 
 function fetch_projectinfo() {
@@ -208,16 +217,43 @@ function fetch_mounts() {
 	echo "== fstab =="
 	cat /etc/fstab
 	echo
-	echo "== mount =="
-	mount
-	echo
 	echo "== proc/mounts =="
-	cat /proc/mounts
+	cat /proc/mounts 2>/dev/null || mount
+	echo
+}
+
+function fetch_lvm() {
+	for cmd in pvs vgs lvs; do
+		echo "== $cmd =="
+		$cmd 2>&1
+	done
+	echo
+}
+
+function fetch_zfs() {
+	echo "== zpool =="
+	zpool 2>&1
+	echo
+}
+
+function fetch_kernel() {
+	echo -n "== kernel: "
+	uname -r 2>&1
+	echo -n "== uname: "
+	uname -a 2>&1
+	echo
+	echo "== lsmod =="
+	lsmod 2>&1
 	echo
 }
 
 function fetch_systemctl() {
 	systemctl list-units > others/systemctl-units.dat
+}
+
+function fetch_getenforce() {
+	echo -n "== getenforce: "
+	getenforce 2>&1
 }
 
 # -------------------------- main ---------------------------
@@ -271,10 +307,13 @@ for subdir in log etc var trix others; do
 done
 
 (
-fetch_date > lsosreport.log
 fetch_trixrelease
 fetch_projectinfo
+fetch_date
+fetch_uptime
 fetch_osinfo
+fetch_getenforce
+fetch_kernel
 fetch_processes
 fetch_networkinfo
 fetch_firewallinfo
@@ -286,6 +325,8 @@ fetch_var
 fetch_trix
 fetch_dmesg
 fetch_packages
+fetch_lvm
+fetch_zfs
 fetch_mounts
 fetch_systemctl
 fetch_clusterinfo
