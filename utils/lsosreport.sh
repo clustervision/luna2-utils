@@ -67,18 +67,39 @@ function fetch_processes() {
 }
 
 function fetch_logs() {
-	if [ -d /var/log/luna ]; then
-		cp -ar /var/log/luna . && \
-		mv luna luna-logs
-	else
-		echo "== no luna logs available"
-	fi
-	cp /var/log/messages . && \
-	mv messages var-log-messages
+	for logfile in messages luna pacemaker trinity.log sssd slurm httpd nginx ondemand-nginx; do
+		echo "== logfiles $logfile =="
+		cp -arL /var/log/$logfile $WORK/log/ 2>&1
+	done
+	echo
+}
+
+function fetch_conf() {
+	for conffile in drbd drbd.d sssd slurm sudoers sudoers.d ssh dhcp named http nginx; do
+		echo "== conffiles $conffile =="
+		cp -arL /etc/$logfile $WORK/etc/ 2>&1
+	done
+	echo
+}
+
+function fetch_var() {
+	for varfile in named; do
+		echo "== varfiles $varfile =="
+		cp -arL /var/$varfile $WORK/var/ 2>&1
+	done
+	echo
+}
+
+function fetch_trix() {
+	echo "== trix local files =="
+	cp -arL /trinity/local/etc $WORK/trix/ 2>&1
+	cp -arL /trinity/local/luna/daemon $WORK/trix/ 2>&1
+	cp -arL /trinity/local/luna/cli $WORK/trix/ 2>&1
+	echo
 }
 
 function fetch_dmesg() {
-	dmesg > dmesg.out
+	dmesg > $WORK/log/dmesg
 }
 
 function fetch_clusterinfo() {
@@ -242,6 +263,12 @@ if [ ! -d $WORK ]; then
 	mkdir -p $WORK
 fi
 cd $WORK || (echo cannot change into directory $WORK and have to bail out; exit 1)
+for subdir in log etc var trix; do
+	if [ ! -d $WORK/$subdir ]; then
+		mkdir -p $WORK/$subdir
+	fi
+	ls $subdir &> /dev/null || (echo cannot find $subdir directory $WORK/$subdir and have to bail out; exit 1)
+done
 
 (
 fetch_date > lsosreport.log
@@ -254,6 +281,9 @@ fetch_firewallinfo
 fetch_netstat
 fetch_ipmi
 fetch_logs
+fetch_conf
+fetch_var
+fetch_trix
 fetch_dmesg
 fetch_packages
 fetch_mounts
