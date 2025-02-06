@@ -133,6 +133,24 @@ function fetch_date() {
 	date
 }
 
+function fetch_lunaha() {
+	echo "== lmaster =="
+	lmaster -a 2>&1
+	echo
+}
+
+function fetch_pcs() {
+	echo "== pcs =="
+	pcs status 2>&1
+	echo
+}
+
+function fetch_drbd() {
+	echo "== drbd =="
+	drbdadm status 2>&1
+	echo
+}
+
 # -------------------------- main ---------------------------
 
 add_message "TrinityX sos gathering utility for support purposes"
@@ -177,16 +195,21 @@ if [ ! -d $WORK ]; then
 fi
 cd $WORK || (echo cannot change into directory $WORK and have to bail out; exit 1)
 
+(
 fetch_date > lsosreport.log
-fetch_trixrelease >> lsosreport.log
-fetch_projectinfo >> lsosreport.log
-fetch_osinfo >> lsosreport.log
-fetch_processes >> lsosreport.log
-fetch_networkinfo >> lsosreport.log
-fetch_firewallinfo >> lsosreport.log
-fetch_logs >> lsosreport.log
-fetch_dmesg >> lsosreport.log
-fetch_clusterinfo >> lsosreport.log
+fetch_trixrelease
+fetch_projectinfo
+fetch_osinfo
+fetch_processes
+fetch_networkinfo
+fetch_firewallinfo
+fetch_logs
+fetch_dmesg
+fetch_clusterinfo
+fetch_lunaha
+fetch_pcs
+fetch_drbd
+) > lsosreport.log
 
 tar -zcvf $FILE * || (echo "encountered a problem creating $FILE and i have to bail out"; exit 1)
 echo
