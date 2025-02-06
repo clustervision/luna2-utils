@@ -67,7 +67,7 @@ function fetch_processes() {
 }
 
 function fetch_logs() {
-	for logfile in messages luna pacemaker trinity.log sssd slurm httpd nginx ondemand-nginx; do
+	for logfile in messages luna pacemaker trinity.log sssd slurm httpd nginx ondemand-nginx my.cnf my.cnf.d; do
 		echo "== logfiles $logfile =="
 		cp -arL /var/log/$logfile $WORK/log/ 2>&1
 	done
@@ -156,7 +156,7 @@ function fetch_ipmi() {
 	echo "== ipmi lan =="
 	ipmitool lan print 2>&1
 	echo
-	ipmitool sel list 2>&1 > ipmi-sel-list.dat
+	ipmitool sel list 2>&1 > others/ipmi-sel-list.dat
 }
 
 function fetch_date() {
@@ -201,7 +201,7 @@ function fetch_trixdiag() {
 }
 
 function fetch_packages() {
-	rpm -qa --last > package-list.dat
+	rpm -qa --last > others/package-list.dat
 }
 
 function fetch_mounts() {
@@ -217,7 +217,7 @@ function fetch_mounts() {
 }
 
 function fetch_systemctl() {
-	systemctl list-units > systemctl-units.dat
+	systemctl list-units > others/systemctl-units.dat
 }
 
 # -------------------------- main ---------------------------
@@ -263,7 +263,7 @@ if [ ! -d $WORK ]; then
 	mkdir -p $WORK
 fi
 cd $WORK || (echo cannot change into directory $WORK and have to bail out; exit 1)
-for subdir in log etc var trix; do
+for subdir in log etc var trix others; do
 	if [ ! -d $WORK/$subdir ]; then
 		mkdir -p $WORK/$subdir
 	fi
