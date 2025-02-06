@@ -128,6 +128,16 @@ function fetch_firewallinfo() {
 	echo
 }	
 
+function fetch_ipmi() {
+	echo "== ipmi user list =="
+	ipmitool user list 1 2>&1
+	echo
+	echo "== ipmi lan =="
+	ipmitool lan print 2>&1
+	echo
+	ipmitool sel list 2>&1 > ipmi-sel-list.dat
+}
+
 function fetch_date() {
 	echo -n "== date: "
 	date
@@ -180,9 +190,13 @@ function fetch_mounts() {
 	echo "== mount =="
 	mount
 	echo
-	echo "== proc/mount =="
+	echo "== proc/mounts =="
 	cat /proc/mounts
 	echo
+}
+
+function fetch_systemctl() {
+	systemctl list-units > systemctl-units.dat
 }
 
 # -------------------------- main ---------------------------
@@ -238,10 +252,12 @@ fetch_processes
 fetch_networkinfo
 fetch_firewallinfo
 fetch_netstat
+fetch_ipmi
 fetch_logs
 fetch_dmesg
 fetch_packages
 fetch_mounts
+fetch_systemctl
 fetch_clusterinfo
 fetch_trixdiag
 fetch_lunaha
