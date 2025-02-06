@@ -297,7 +297,7 @@ fetch_drbd
 
 tar -zcvf $FILE * || (echo "encountered a problem creating $FILE and i have to bail out"; exit 1)
 echo
-add_message "File $FILE has been created in $WORK. Please send this to ClusterVision"
+add_message "File $WORK/$FILE has been created. Please send this to ClusterVision"
 show_message
 
 
