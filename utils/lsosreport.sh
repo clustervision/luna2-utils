@@ -157,6 +157,12 @@ function fetch_netstat() {
 	echo
 }
 
+function fetch_trixdiag() {
+	echo "== trix diag =="
+	trix-diag 2>&1
+	echo
+}
+
 # -------------------------- main ---------------------------
 
 add_message "TrinityX sos gathering utility for support purposes"
@@ -213,6 +219,7 @@ fetch_netstat
 fetch_logs
 fetch_dmesg
 fetch_clusterinfo
+fetch_trixdiag
 fetch_lunaha
 fetch_pcs
 fetch_drbd
