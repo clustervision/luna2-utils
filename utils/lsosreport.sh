@@ -151,6 +151,12 @@ function fetch_drbd() {
 	echo
 }
 
+function fetch_netstat() {
+	echo "== netstat =="
+	netstat -tulpen
+	echo
+}
+
 # -------------------------- main ---------------------------
 
 add_message "TrinityX sos gathering utility for support purposes"
@@ -203,6 +209,7 @@ fetch_osinfo
 fetch_processes
 fetch_networkinfo
 fetch_firewallinfo
+fetch_netstat
 fetch_logs
 fetch_dmesg
 fetch_clusterinfo
