@@ -297,6 +297,7 @@ if [ -d $WORK ]; then
 fi
 if [ ! -d $WORK ]; then
 	mkdir -p $WORK
+	chmod og-rwx $WORK
 fi
 cd $WORK || (echo cannot change into directory $WORK and have to bail out; exit 1)
 for subdir in log etc var trix others; do
