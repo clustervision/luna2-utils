@@ -4,6 +4,7 @@ include README.md
 include utils/*
 include utils/utils/*.py
 include utils/lchroot
+include utils/lsosreport
 include utils/bootutil.tclsh
 include utils/slurm.ini
 include utils/*VERSION.txt
