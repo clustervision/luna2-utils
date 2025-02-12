@@ -69,7 +69,7 @@ def new_version():
     This Method will create a New version and update the Version file.
     """
     time_now = int(time())
-    version = f'2.0.{time_now}'
+    version = f'2.1.{time_now}'
     with open('utils/VERSION.txt', 'w', encoding='utf-8') as ver:
         ver.write(version)
     return version
