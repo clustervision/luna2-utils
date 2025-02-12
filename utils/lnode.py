@@ -34,6 +34,7 @@ __status__      = 'Development'
 
 import re
 import sys
+import json
 import argparse
 from configparser import ConfigParser
 
@@ -111,7 +112,13 @@ class CLI():
         else:
             print_error('The list command can only be run on a single node, hostlist not supported')
             sys.exit(1)
-        print(resp.text)
+        try:
+            data = json.loads(resp.text)
+            message = data['control']['sel']
+            message = message.replace(';;','\n')
+            print(message)
+        except:
+            print(resp.text)
 
 
     def clear(self, nodes):
