@@ -24,9 +24,9 @@ This file is the entry point for provisioning
 """
 
 __author__      = 'Diego Sonaglia'
-__copyright__   = 'Copyright 2023, Luna2 Project [UTILITY]'
+__copyright__   = 'Copyright 2025, Luna2 Project [UTILITY]'
 __license__     = 'GPL'
-__version__     = '2.0'
+__version__     = '2.1'
 __maintainer__  = 'Dev-team'
 __email__       = 'diego.sonaglia@clustervision.com'
 __status__      = 'Development'

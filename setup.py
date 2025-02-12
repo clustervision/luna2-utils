@@ -24,9 +24,9 @@ Setup file, will build the pip package for the project.
 """
 
 __author__      = 'Sumit Sharma'
-__copyright__   = 'Copyright 2022, Luna2 Project[UTILS]'
+__copyright__   = 'Copyright 2025, Luna2 Project[UTILS]'
 __license__     = 'GPL'
-__version__     = '2.0'
+__version__     = '2.1'
 __maintainer__  = 'Sumit Sharma'
 __email__       = 'sumit.sharma@clustervision.com'
 __status__      = 'Development'

@@ -23,9 +23,9 @@
 limport Utility for Trinity Project
 """
 __author__      = "Diego Sonaglia"
-__copyright__   = "Copyright 2022, Luna2 Project [UTILITY]"
+__copyright__   = "Copyright 2025, Luna2 Project [UTILITY]"
 __license__     = "GPL"
-__version__     = "2.0"
+__version__     = "2.1"
 __maintainer__  = "Diego Sonaglia"
 __email__       = "diego.sonaglia@clustervision.com"
 __status__      = "Development"
