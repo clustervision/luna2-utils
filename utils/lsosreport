@@ -90,6 +90,15 @@ function fetch_var() {
 	echo
 }
 
+function fetch_node_logs() {
+	echo "== node logfiles =="
+	if [ ! -d $WORK/log/cluster-messages ]; then
+		mkdir -p $WORK/log/cluster-messages 2>&1
+	fi
+	cp -aL /var/log/cluster-messages/*.messages $WORK/log/cluster-messages/ 2>&1
+	echo
+}
+
 function fetch_trix() {
 	echo "== trix local files =="
 	cp -arL /trinity/local/etc $WORK/trix/ 2>&1
@@ -321,6 +330,7 @@ fetch_firewallinfo
 fetch_netstat
 fetch_ipmi
 fetch_logs
+fetch_node_logs
 fetch_conf
 fetch_var
 fetch_trix
