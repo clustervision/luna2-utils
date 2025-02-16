@@ -75,7 +75,7 @@ function fetch_logs() {
 }
 
 function fetch_conf() {
-	for conffile in drbd drbd.d sssd slurm sudoers sudoers.d ssh dhcp named named.conf http nginx my.cnf my.cnf.d selinux ood; do
+	for conffile in drbd drbd.d sssd slurm sudoers sudoers.d ssh dhcp named named.conf http nginx my.cnf my.cnf.d selinux ood trinity; do
 		echo "== conffiles $conffile =="
 		cp -arL /etc/$conffile $WORK/etc/ 2>&1
 	done
@@ -102,8 +102,9 @@ function fetch_node_logs() {
 function fetch_trix() {
 	echo "== trix local files =="
 	cp -arL /trinity/local/etc $WORK/trix/ 2>&1
-	cp -arL /trinity/local/luna/daemon $WORK/trix/ 2>&1
-	cp -arL /trinity/local/luna/cli $WORK/trix/ 2>&1
+	mkdir -p $WORK/trix/luna 2>&1
+	cp -arL /trinity/local/luna/daemon $WORK/trix/luna/ 2>&1
+	cp -arL /trinity/local/luna/cli $WORK/trix/luna/ 2>&1
 	cp -arL /trinity/local/backup $WORK/trix/ 2>&1
 	echo
 }
