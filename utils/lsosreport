@@ -104,6 +104,7 @@ function fetch_trix() {
 	cp -arL /trinity/local/etc $WORK/trix/ 2>&1
 	cp -arL /trinity/local/luna/daemon $WORK/trix/ 2>&1
 	cp -arL /trinity/local/luna/cli $WORK/trix/ 2>&1
+	cp -arL /trinity/local/backup $WORK/trix/ 2>&1
 	echo
 }
 
