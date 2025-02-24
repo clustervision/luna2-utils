@@ -84,9 +84,11 @@ class Diagnosis():
         if self.controller is False:
             self.exit_diagnosis('Trinity Diagnosis is only Available from the Controller OR Luna2 Daemon is not present.')
         response = ''
+        status = True
         with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True) as process:
             output, error = process.communicate()
             output = output.decode("utf-8")  if output else ''
+            status = False if error else True
             error = error.decode("utf-8")  if error else ''
             response = output if output else error
             response = response.replace('\n', '')
@@ -102,7 +104,7 @@ class Diagnosis():
             response = response.replace('could not be found', colored('could not be found', 'yellow', attrs=['bold']))
             response = response.strip()
 
-        return response
+        return status, response
 
 
     def execute(self, command=None):
@@ -136,6 +138,7 @@ def main():
         "Trinity OOD": {}
     }
     debian = False
+    status = True
     os_info = Diagnosis().platform_info()
     for _, os_value in os_info.items():
         if 'debian' in os_value.lower() or 'ubuntu' in os_value.lower():
@@ -146,12 +149,17 @@ def main():
         response["Trinity OOD"]["httpd"] = None
     for key, value in response.items():
         for service, val in value.items():
-            response[key][service] = Diagnosis().trinity_status(f"systemctl status {service}.service | grep Active:")
+            ret, response[key][service] = Diagnosis().trinity_status(f"systemctl status {service}.service | grep Active:")
+            if not ret:
+                status = False
     for key, value in response.items():
         print(colored(key, 'grey', attrs=['bold']))
         for service, val in value.items():
             print(f'\t{service}: {val}')
         print('\n')
+    if status:
+        exit(0)
+    exit(1)
 
 
 if __name__ == "__main__":
