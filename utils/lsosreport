@@ -67,7 +67,7 @@ function fetch_processes() {
 }
 
 function fetch_logs() {
-	for logfile in messages luna pacemaker trinity.log sssd slurm httpd nginx ondemand-nginx; do
+	for logfile in messages luna alertx pacemaker trinity.log sssd slurm httpd nginx ondemand-nginx; do
 		echo "== logfiles $logfile =="
 		cp -arL /var/log/$logfile $WORK/log/ 2>&1
 	done
