@@ -239,21 +239,21 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
             try:
                 r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
-                if (r.text):
+                if r.text:
                     DATA=json.loads(r.text)
-                if (status_code == "204"):
+                if status_code == "204":
                     print(nodes+": "+action)
-                elif (status_code in RET):
+                elif status_code in RET:
                     print(nodes+": failed: "+RET[status_code])
-                elif('control' in DATA):
-                    print(nodes+": "+str(DATA['control']['power'] or 'no results returned'))
-                elif('message' in DATA and 'control' in DATA['message']):
-                    if 'power' in DATA['message']['control']):
-                        print(nodes+": "+str(DATA['message']['control']['power'] or 'no results returned'))
-                    elif 'chassis' in DATA['message']['control']):
-                        print(nodes+": "+str(DATA['message']['control']['chassis'] or 'no results returned'))
+                elif 'control' in DATA:
+                    if 'power' in DATA['control']:
+                        print(nodes+": "+str(DATA['control']['power'] or 'no results returned'))
+                    elif 'chassis' in DATA['control']:
+                        print(nodes+": "+str(DATA['control']['chassis'] or 'no results returned'))
                     else:
-                    print(f"ERROR :: [{status_code}]: {r.text}")
+                        print(f"ERROR :: [{status_code}]: {DATA['control']}")
+                elif('message' in DATA):
+                    print(nodes+": "+str(DATA['message'] or 'no message returned'))
                 else:
                     # when we don't know how to handle the returned data
                     print(f"ERROR :: [{status_code}]: {r.text}")
