@@ -124,8 +124,13 @@ positional arguments:
                                node[x-y],
                                nodex,nodey,...
                                nodex
-  {status,on,off,reset,cycle,identify,noidentify}
-                            Action
+  'Action'
+                            The desired performed action for the hosts:
+                            - status:  collects and lists the power status
+                            - on, off: toggles the power state, equal to power button
+                            - reset:   power reset equal to off + on
+                            - cycle:   hard power cycle, equal to power cord reset
+                            - identify, noidentify: toggles an indicator LED for identification
 
 optional arguments:
   -h, --help                show this help message and exit
