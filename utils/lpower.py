@@ -124,8 +124,8 @@ positional arguments:
                                node[x-y],
                                nodex,nodey,...
                                nodex
-  'Action'
-                            The desired performed action for the hosts:
+
+  'Action'                  The desired performed action for the hosts:
                             - status:  collects and lists the power status
                             - on, off: toggles the power state, equal to power button
                             - reset:   power reset equal to off + on
