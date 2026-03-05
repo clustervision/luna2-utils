@@ -247,6 +247,13 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
                     print(nodes+": failed: "+RET[status_code])
                 elif('control' in DATA):
                     print(nodes+": "+str(DATA['control']['power'] or 'no results returned'))
+                elif('message' in DATA and 'control' in DATA['message']):
+                    if 'power' in DATA['message']['control']):
+                        print(nodes+": "+str(DATA['message']['control']['power'] or 'no results returned'))
+                    elif 'chassis' in DATA['message']['control']):
+                        print(nodes+": "+str(DATA['message']['control']['chassis'] or 'no results returned'))
+                    else:
+                    print(f"ERROR :: [{status_code}]: {r.text}")
                 else:
                     # when we don't know how to handle the returned data
                     print(f"ERROR :: [{status_code}]: {r.text}")
