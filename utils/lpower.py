@@ -88,14 +88,15 @@ def main(argv):
             GROUP=argv.pop(0)
         elif (item == "-r" or item == "--rack"):
             RACK=argv.pop(0)
-        elif (item in ['status','on','off','reset','cycle']):
-            ACTION=item
-            SUBSYSTEM='power'
-        elif (item in ['identify','noidentify']):
-            ACTION=item
-            SUBSYSTEM='chassis'
         elif item and not NODES:
             NODES=item
+        elif NODES:
+            if (item in ['status','on','off','reset','cycle']):
+                ACTION=item
+                SUBSYSTEM='power'
+            elif (item in ['identify','noidentify']):
+                ACTION=item
+                SUBSYSTEM='chassis'
         else:
             print("Error: Invalid options used.")
             call_help()
@@ -120,12 +121,17 @@ usage: lpower [-h] [--rack|-r RACKNAME] [--group|-g GROUP]
 BMC power management.
 
 positional arguments:
-  hosts                     Host list. Any combination of: 
+  hosts                     Host list. Any combination of:
                                node[x-y],
                                nodex,nodey,...
                                nodex
-  {status,on,off,reset,cycle,identify,noidentify}
-                            Action
+
+  'Action'                  The desired performed action for the hosts:
+                            - status:  collects and lists the power status
+                            - on, off: toggles the power state, equal to power button
+                            - reset:   power reset equal to off + on
+                            - cycle:   hard power cycle, equal to power cord reset
+                            - identify, noidentify: toggles an indicator LED for identification
 
 optional arguments:
   -h, --help                show this help message and exit
@@ -134,6 +140,37 @@ optional arguments:
     """)
 
 # ----------------------------------------------------------------------------
+
+def get_all_nodes():
+    CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
+    RET = {'400': 'invalid request', '404': 'group name invalid', '401': 'action not authorized', '503': 'service not available'}
+    headers = {'x-access-tokens': CONF['TOKEN']}
+    nodes = []
+    try:
+        r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/node', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
+        status_code=str(r.status_code)
+        if (status_code == "200"):
+            if (r.text):
+               DATA=json.loads(r.text)
+               try:
+                   for node in DATA['config']['node'].keys():
+                       nodes.append(node)
+                   return nodes
+               except Exception as exp:
+                   print(f'ERROR :: returned unrecognized format while fetching all nodes')
+                   sys.exit(3)
+        elif (status_code in RET):
+            print(f"ERROR :: {group} failed: {RET[status_code]}")
+            sys.exit(3)
+        else:
+            # when we don't know how to handle the returned data
+            print(f"ERROR :: [{status_code}]: {r.text}")
+            sys.exit(3)
+    except requests.exceptions.SSLError as ssl_loop_error:
+        print(f'ERROR :: {ssl_loop_error}')
+        sys.exit(3)
+    except Exception as exp:
+        print(f'ERROR :: {exp}')
 
 def get_group_nodes(group=None):
     if group:
@@ -208,11 +245,14 @@ def get_rack_nodes(rack=None):
 
 def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None):
     if group:
-        group_nodes = get_group_nodes(group)
-        if not nodes:
-            nodes=group_nodes
+        if group == "All" or group == "all":
+            nodes=','.join(get_all_nodes())
         else:
-            nodes+=','+group_nodes
+            group_nodes = get_group_nodes(group)
+            if not nodes:
+                nodes=group_nodes
+            else:
+                nodes+=','+group_nodes
     if rack:
         rack_nodes = get_rack_nodes(rack)
         if not nodes:
@@ -234,14 +274,21 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
             try:
                 r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
-                if (r.text):
+                if r.text:
                     DATA=json.loads(r.text)
-                if (status_code == "204"):
+                if status_code == "204":
                     print(nodes+": "+action)
-                elif (status_code in RET):
+                elif status_code in RET:
                     print(nodes+": failed: "+RET[status_code])
-                elif('control' in DATA):
-                    print(nodes+": "+str(DATA['control']['power'] or 'no results returned'))
+                elif 'control' in DATA:
+                    if 'power' in DATA['control']:
+                        print(nodes+": "+str(DATA['control']['power'] or 'no results returned'))
+                    elif 'chassis' in DATA['control']:
+                        print(nodes+": "+str(DATA['control']['chassis'] or 'no results returned'))
+                    else:
+                        print(f"ERROR :: [{status_code}]: {DATA['control']}")
+                elif('message' in DATA):
+                    print(nodes+": "+str(DATA['message'] or 'no message returned'))
                 else:
                     # when we don't know how to handle the returned data
                     print(f"ERROR :: [{status_code}]: {r.text}")
