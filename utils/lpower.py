@@ -88,14 +88,15 @@ def main(argv):
             GROUP=argv.pop(0)
         elif (item == "-r" or item == "--rack"):
             RACK=argv.pop(0)
-        elif (item in ['status','on','off','reset','cycle']):
-            ACTION=item
-            SUBSYSTEM='power'
-        elif (item in ['identify','noidentify']):
-            ACTION=item
-            SUBSYSTEM='chassis'
         elif item and not NODES:
             NODES=item
+        elif NODES:
+            if (item in ['status','on','off','reset','cycle']):
+                ACTION=item
+                SUBSYSTEM='power'
+            elif (item in ['identify','noidentify']):
+                ACTION=item
+                SUBSYSTEM='chassis'
         else:
             print("Error: Invalid options used.")
             call_help()
