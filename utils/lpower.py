@@ -100,7 +100,7 @@ def main(argv):
         elif item and not ACTION:
             ACTION=item
         else:
-            print("Error: Invalid options used.")
+            _print("Error: Invalid options used.")
             call_help()
             sys.exit()
     if NODES and not ACTION:
@@ -114,7 +114,7 @@ def main(argv):
             ACTION=item
             SUBSYSTEM='chassis'
     if (NODES is None and GROUP is None and RACK is None) or (ACTION is None):
-        print("Error: Instruction incomplete. Nodes and Task expected.")
+        _print("Error: Instruction incomplete. Nodes and Task expected.")
         call_help()
         sys.exit()
     handleRequest(nodes=NODES,group=GROUP,rack=RACK,subsystem=SUBSYSTEM,action=ACTION)
@@ -169,20 +169,20 @@ def get_all_nodes():
                        nodes.append(node)
                    return nodes
                except Exception as exp:
-                   print(f'ERROR :: returned unrecognized format while fetching all nodes')
+                   _print(f'ERROR :: returned unrecognized format while fetching all nodes')
                    sys.exit(3)
         elif (status_code in RET):
-            print(f"ERROR :: {group} failed: {RET[status_code]}")
+            _print(f"ERROR :: {group} failed: {RET[status_code]}")
             sys.exit(3)
         else:
             # when we don't know how to handle the returned data
-            print(f"ERROR :: [{status_code}]: {r.text}")
+            _print(f"ERROR :: [{status_code}]: {r.text}")
             sys.exit(3)
     except requests.exceptions.SSLError as ssl_loop_error:
-        print(f'ERROR :: {ssl_loop_error}')
+        _print(f'ERROR :: {ssl_loop_error}')
         sys.exit(3)
     except Exception as exp:
-        print(f'ERROR :: {exp}')
+        _print(f'ERROR :: {exp}')
 
 def get_group_nodes(group=None):
     if group:
@@ -200,20 +200,20 @@ def get_group_nodes(group=None):
                         nodes=','.join(nodelist)
                         return nodes
                     except Exception as exp:
-                        print(f'ERROR :: returned unrecognized format while fetching nodes in group')
+                        _print(f'ERROR :: returned unrecognized format while fetching nodes in group')
                         sys.exit(3)
             elif (status_code in RET):
-                print(f"ERROR :: {group} failed: {RET[status_code]}")
+                _print(f"ERROR :: {group} failed: {RET[status_code]}")
                 sys.exit(3)
             else:
                 # when we don't know how to handle the returned data
-                print(f"ERROR :: [{status_code}]: {r.text}")
+                _print(f"ERROR :: [{status_code}]: {r.text}")
                 sys.exit(3)
         except requests.exceptions.SSLError as ssl_loop_error:
-            print(f'ERROR :: {ssl_loop_error}')
+            _print(f'ERROR :: {ssl_loop_error}')
             sys.exit(3)
         except Exception as exp:
-            print(f'ERROR :: {exp}')
+            _print(f'ERROR :: {exp}')
             sys.exit(3)
 
 def get_rack_nodes(rack=None):
@@ -236,20 +236,20 @@ def get_rack_nodes(rack=None):
                         nodes=','.join(nodelist)
                         return nodes
                     except Exception as exp:
-                        print(f'ERROR :: returned unrecognized format while fetching nodes in rack')
+                        _print(f'ERROR :: returned unrecognized format while fetching nodes in rack')
                         sys.exit(3)
             elif (status_code in RET):
-                print(f"ERROR :: {rack} failed: {RET[status_code]}")
+                _print(f"ERROR :: {rack} failed: {RET[status_code]}")
                 sys.exit(3)
             else:
                 # when we don't know how to handle the returned data
-                print(f"ERROR :: [{status_code}]: {r.text}")
+                _print(f"ERROR :: [{status_code}]: {r.text}")
                 sys.exit(3)
         except requests.exceptions.SSLError as ssl_loop_error:
-            print(f'ERROR :: {ssl_loop_error}')
+            _print(f'ERROR :: {ssl_loop_error}')
             sys.exit(3)
         except Exception as exp:
-            print(f'ERROR :: {exp}')
+            _print(f'ERROR :: {exp}')
             sys.exit(3)
 
 
@@ -283,7 +283,7 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
 
         # single node query we do with GET
         if (result and nodes == result.group(1)):
-            print(f"Proceeding with host: {nodes}")
+            _print(f"Proceeding with host: {nodes}")
             try:
                 r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
@@ -299,23 +299,23 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
                     elif 'chassis' in DATA['control']:
                         print(nodes+": "+str(DATA['control']['chassis'] or 'no results returned'))
                     else:
-                        print(f"ERROR :: [{status_code}]: {DATA['control']}")
+                        _print(f"ERROR :: [{status_code}]: {DATA['control']}")
                 elif('message' in DATA):
                     print(nodes+": "+str(DATA['message'] or 'no message returned'))
                 else:
                     # when we don't know how to handle the returned data
-                    print(f"ERROR :: [{status_code}]: {r.text}")
+                    _print(f"ERROR :: [{status_code}]: {r.text}")
             except requests.exceptions.SSLError as ssl_loop_error:
-                print(f'ERROR :: {ssl_loop_error}')
+                _print(f'ERROR :: {ssl_loop_error}')
                 sys.exit(3)
             except requests.exceptions.HTTPError as err:
-                print("Error: trouble getting results: "+str(err))
+                _print("Error: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.ConnectionError as err:
-                print("Error: trouble getting results: "+str(err))
+                _print("Error: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.Timeout as err:
-                print("Error: trouble getting results: "+str(err))
+                _print("Error: trouble getting results: "+str(err))
                 exit(3)
         # else, we have to work with a list. backend offloads this but we have to keep polling for updates
         else:
@@ -325,9 +325,9 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
                 except:
                     pass
             if len(nodes) > 75:
-                print(f"Proceeding with host list: {nodes[:75]}...")
+                _print(f"Proceeding with host list: {nodes[:75]}...")
             else:
-                print(f"Proceeding with host list: {nodes}")
+                _print(f"Proceeding with host list: {nodes}")
             try:
                 body = {'control': { subsystem: { action: { 'hostlist': nodes } } } }
                 r = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', stream=True, headers=headers, json=body, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
@@ -351,21 +351,21 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
                     # -----------------------------------------------------------------------------------------------
                 else:
                     # when we don't know how to handle the returned data
-                    print(status_code+' ::: '+r.text)
+                    _print(status_code+' ::: '+r.text)
             except requests.exceptions.SSLError as ssl_loop_error:
-                print(f'ERROR :: {ssl_loop_error}')
+                _print(f'ERROR :: {ssl_loop_error}')
                 sys.exit(3)
             except requests.exceptions.HTTPError as err:
-                print("Error: trouble getting results: "+str(err))
+                _print("Error: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.ConnectionError as err:
-                print("Error: trouble getting results: "+str(err))
+                _print("Error: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.Timeout as err:
-                print("Error: trouble getting results: "+str(err))
+                _print("Error: trouble getting results: "+str(err))
                 exit(3)
     else:
-        print("Error: not enough parameters to run with")
+        _print("Error: not enough parameters to run with")
 
 # ----------------------------------------------------------------------------
 
@@ -394,6 +394,12 @@ def handleResults(DATA,request_id=None,subsystem=None,action=None):
     return request_id
 
 # ----------------------------------------------------------------------------
+
+def _print(message=None):
+    try:
+        sys.stderr.write(message+"\n")
+    except:
+        print(message)
 
 # hidden at the bottom; the call for the main function...
 main(sys.argv[1:])
