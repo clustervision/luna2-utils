@@ -204,6 +204,10 @@ def handleClusterRequest(action=None,file=None,force=False):
                 print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
                 exit(3)
+            except Exception as err:
+                print("ERROR :: trouble exporting: "+str(err))
+                logger.error(f"trouble exporting: {err}")
+                exit(3)
         elif action == 'import':
             try:
                 if not os.path.exists(file):
@@ -232,6 +236,11 @@ def handleClusterRequest(action=None,file=None,force=False):
             except requests.exceptions.Timeout as err:
                 print("ERROR :: trouble getting results: "+str(err))
                 logger.error(f"trouble getting results: {err}")
+                exit(3)
+            except Exception as err:
+                print("ERROR :: trouble importing: "+str(err))
+                logger.error(f"trouble importing: {err}")
+                exit(3)
     else:
         print("ERROR :: not enough parameters to run with")
         exit(2)
