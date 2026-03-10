@@ -47,6 +47,13 @@ from utils.utils.log import Log
 from utils.utils.ini import Ini
 from utils.utils.token import Token
 
+try:
+    from trinityx_config_slurm.utils.hostlist import compress, expand
+    use_compress = True
+except:
+    use_compress = False
+    pass
+
 logger = Log.init_log(log_file='/var/log/luna/lpower.log',log_level='info')
 CONF = Ini.read_ini(ini_file='/trinity/local/luna/utils/config/luna.ini')
 
@@ -90,17 +97,22 @@ def main(argv):
             RACK=argv.pop(0)
         elif item and not NODES:
             NODES=item
-        elif NODES:
-            if (item in ['status','on','off','reset','cycle']):
-                ACTION=item
-                SUBSYSTEM='power'
-            elif (item in ['identify','noidentify']):
-                ACTION=item
-                SUBSYSTEM='chassis'
+        elif item and not ACTION:
+            ACTION=item
         else:
             print("Error: Invalid options used.")
             call_help()
             sys.exit()
+    if NODES and not ACTION:
+        ACTION=NODES
+        NODES=None
+    if ACTION:
+        if (ACTION in ['status','on','off','reset','cycle']):
+            ACTION=item
+            SUBSYSTEM='power'
+        elif (ACTION in ['identify','noidentify']):
+            ACTION=item
+            SUBSYSTEM='chassis'
     if (NODES is None and GROUP is None and RACK is None) or (ACTION is None):
         print("Error: Instruction incomplete. Nodes and Task expected.")
         call_help()
@@ -271,6 +283,7 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
 
         # single node query we do with GET
         if (result and nodes == result.group(1)):
+            print(f"Proceeding with host: {nodes}")
             try:
                 r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/{nodes}/_{action}', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
                 status_code=str(r.status_code)
@@ -306,6 +319,15 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
                 exit(3)
         # else, we have to work with a list. backend offloads this but we have to keep polling for updates
         else:
+            if use_compress:
+                try:
+                    nodes = compress(nodes)
+                except:
+                    pass
+            if len(nodes) > 75:
+                print(f"Proceeding with host list: {nodes[:75]}...")
+            else:
+                print(f"Proceeding with host list: {nodes}")
             try:
                 body = {'control': { subsystem: { action: { 'hostlist': nodes } } } }
                 r = session.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/control/action/{subsystem}/_{action}', stream=True, headers=headers, json=body, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
