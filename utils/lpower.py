@@ -27,7 +27,7 @@ __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
-#VERSION: 0.2.5
+#VERSION: 0.3
 
 import os
 import getpass
