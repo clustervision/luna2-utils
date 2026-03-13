@@ -27,7 +27,7 @@ __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
-#VERSION: 0.2.5
+#VERSION: 0.3
 
 import os
 import getpass
@@ -187,12 +187,12 @@ def get_all_nodes():
 def get_group_nodes(group=None):
     if group:
         CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
-        RET = {'400': 'invalid request', '404': 'group name invalid', '401': 'action not authorized', '503': 'service not available'}
+        RET = {'400': 'invalid request', '404': 'group name invalid or no nodes assigned to group', '401': 'action not authorized', '503': 'service not available'}
         headers = {'x-access-tokens': CONF['TOKEN']}
         try:
             r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/group/{group}/_member', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
             status_code=str(r.status_code)
-            if (status_code == "200"):
+            if (status_code == '200'):
                 if (r.text):
                     DATA=json.loads(r.text)
                     try:
@@ -203,8 +203,11 @@ def get_group_nodes(group=None):
                         _print(f'ERROR :: returned unrecognized format while fetching nodes in group')
                         sys.exit(3)
             elif (status_code in RET):
-                _print(f"ERROR :: {group} failed: {RET[status_code]}")
-                sys.exit(3)
+                if status_code == '404':
+                    _print(f"WARNING :: {group} failed: {RET[status_code]}")
+                else:
+                    _print(f"ERROR :: {group} failed: {RET[status_code]}")
+                    sys.exit(3)
             else:
                 # when we don't know how to handle the returned data
                 _print(f"ERROR :: [{status_code}]: {r.text}")
@@ -219,12 +222,12 @@ def get_group_nodes(group=None):
 def get_rack_nodes(rack=None):
     if rack:
         CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
-        RET = {'400': 'invalid request', '404': 'rack name invalid', '401': 'action not authorized', '503': 'service not available'}
+        RET = {'400': 'invalid request', '404': 'rack name invalid or no nodes nodes assigned to the rack', '401': 'action not authorized', '503': 'service not available'}
         headers = {'x-access-tokens': CONF['TOKEN']}
         try:
             r = session.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/rack/{rack}', stream=True, headers=headers, timeout=30, verify=CONF["VERIFY_CERTIFICATE"])
             status_code=str(r.status_code)
-            if (status_code == "200"):
+            if (status_code == '200'):
                 if (r.text):
                     DATA=json.loads(r.text)
                     try:
@@ -239,8 +242,11 @@ def get_rack_nodes(rack=None):
                         _print(f'ERROR :: returned unrecognized format while fetching nodes in rack')
                         sys.exit(3)
             elif (status_code in RET):
-                _print(f"ERROR :: {rack} failed: {RET[status_code]}")
-                sys.exit(3)
+                if status_code == '404':
+                    _print(f"WARNING :: {rack} failed: {RET[status_code]}")
+                else:
+                    _print(f"ERROR :: {rack} failed: {RET[status_code]}")
+                    sys.exit(3)
             else:
                 # when we don't know how to handle the returned data
                 _print(f"ERROR :: [{status_code}]: {r.text}")
@@ -257,20 +263,24 @@ def get_rack_nodes(rack=None):
 
 def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None):
     if group:
-        if group == "All" or group == "all":
-            nodes=','.join(get_all_nodes())
-        else:
-            group_nodes = get_group_nodes(group)
-            if not nodes:
-                nodes=group_nodes
+        for singlegroup in group.split(','):
+            if singlegroup == "All" or singlegroup == "all":
+                nodes=','.join(get_all_nodes())
             else:
-                nodes+=','+group_nodes
+                group_nodes = get_group_nodes(singlegroup)
+                if group_nodes:
+                    if not nodes:
+                        nodes=group_nodes
+                    else:
+                        nodes+=','+group_nodes
     if rack:
-        rack_nodes = get_rack_nodes(rack)
-        if not nodes:
-            nodes=rack_nodes
-        else:
-            nodes+=','+rack_nodes
+        for singlerack in rack.split(','):
+            rack_nodes = get_rack_nodes(rack)
+            if rack_nodes:
+                if not nodes:
+                    nodes=rack_nodes
+                else:
+                    nodes+=','+rack_nodes
     if ((not nodes is None) and (not action is None)):
         CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
 
@@ -364,6 +374,8 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
             except requests.exceptions.Timeout as err:
                 _print("Error: trouble getting results: "+str(err))
                 exit(3)
+    elif not nodes:
+        _print("Error: no nodes provided for the given action")
     else:
         _print("Error: not enough parameters to run with")
 
