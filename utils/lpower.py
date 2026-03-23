@@ -27,7 +27,7 @@ __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
-#VERSION: 0.3
+#VERSION: 0.3.1
 
 import os
 import getpass
@@ -100,7 +100,7 @@ def main(argv):
         elif item and not ACTION:
             ACTION=item
         else:
-            _print("Error: Invalid options used.")
+            _print("ERROR :: Invalid options used.")
             call_help()
             sys.exit()
     if NODES and not ACTION:
@@ -114,7 +114,7 @@ def main(argv):
             ACTION=item
             SUBSYSTEM='chassis'
     if (NODES is None and GROUP is None and RACK is None) or (ACTION is None):
-        _print("Error: Instruction incomplete. Nodes and Task expected.")
+        _print("ERROR :: Instruction incomplete. Nodes and Task expected.")
         call_help()
         sys.exit()
     handleRequest(nodes=NODES,group=GROUP,rack=RACK,subsystem=SUBSYSTEM,action=ACTION)
@@ -284,7 +284,8 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
     if ((not nodes is None) and (not action is None)):
         CONF['TOKEN']=Token.get_token(username=CONF['USERNAME'], password=CONF['PASSWORD'], protocol=CONF["PROTOCOL"], endpoint=CONF["ENDPOINT"], verify_certificate=CONF["VERIFY_CERTIFICATE"])
 
-        RET = {'400': 'invalid request', '404': 'node list invalid', '401': 'action not authorized', '503': 'service not available'}
+        RET = {'400': 'invalid request', '404': 'host list invalid or no BMC setup available', '401': 'action not authorized',
+               '500': 'backend could not perform request', '501': 'backend could not perform request', '503': 'service not available'}
         headers = {'x-access-tokens': CONF['TOKEN']}
 
         regex = re.compile("^([a-zA-Z0-9_]+)$")
@@ -301,8 +302,6 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
                     DATA=json.loads(r.text)
                 if status_code == "204":
                     print(nodes+": "+action)
-                elif status_code in RET:
-                    print(nodes+": failed: "+RET[status_code])
                 elif 'control' in DATA:
                     if 'power' in DATA['control']:
                         print(nodes+": "+str(DATA['control']['power'] or 'no results returned'))
@@ -312,20 +311,25 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
                         _print(f"ERROR :: [{status_code}]: {DATA['control']}")
                 elif('message' in DATA):
                     print(nodes+": "+str(DATA['message'] or 'no message returned'))
+                elif status_code in RET:
+                    print(nodes+": failed: "+RET[status_code])
+                    exit(1)
                 else:
                     # when we don't know how to handle the returned data
                     _print(f"ERROR :: [{status_code}]: {r.text}")
+                if status_code in RET:
+                    exit(1)
             except requests.exceptions.SSLError as ssl_loop_error:
                 _print(f'ERROR :: {ssl_loop_error}')
                 sys.exit(3)
             except requests.exceptions.HTTPError as err:
-                _print("Error: trouble getting results: "+str(err))
+                _print("ERROR :: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.ConnectionError as err:
-                _print("Error: trouble getting results: "+str(err))
+                _print("ERROR :: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.Timeout as err:
-                _print("Error: trouble getting results: "+str(err))
+                _print("ERROR :: trouble getting results: "+str(err))
                 exit(3)
         # else, we have to work with a list. backend offloads this but we have to keep polling for updates
         else:
@@ -366,18 +370,18 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
                 _print(f'ERROR :: {ssl_loop_error}')
                 sys.exit(3)
             except requests.exceptions.HTTPError as err:
-                _print("Error: trouble getting results: "+str(err))
+                _print("ERROR :: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.ConnectionError as err:
-                _print("Error: trouble getting results: "+str(err))
+                _print("ERROR :: trouble getting results: "+str(err))
                 exit(3)
             except requests.exceptions.Timeout as err:
-                _print("Error: trouble getting results: "+str(err))
+                _print("ERROR :: trouble getting results: "+str(err))
                 exit(3)
     elif not nodes:
-        _print("Error: no nodes provided for the given action")
+        _print("ERROR :: no nodes provided for the given action")
     else:
-        _print("Error: not enough parameters to run with")
+        _print("ERROR :: not enough parameters to run with")
 
 # ----------------------------------------------------------------------------
 
