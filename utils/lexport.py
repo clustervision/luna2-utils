@@ -30,7 +30,7 @@ __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
-#VERSION: 0.1
+#VERSION: 0.1.1
 
 import os
 import getpass
@@ -50,6 +50,7 @@ from utils.utils.log import Log
 from utils.utils.ini import Ini
 from utils.utils.token import Token
 
+global TMP_DIR
 TMP_DIR='/tmp'
 
 urllib3.disable_warnings()
@@ -107,12 +108,19 @@ def main(argv):
             MATTHEW=argv.pop(0)
         elif (item == "-n" or item == "--name"):
             IMAGENAME=argv.pop(0)
+        elif (item == "-t" or item == "--tmp"):
+            global TMP_DIR
+            TMP_DIR=argv.pop(0)
         elif (item[0] == "-"):
             print("ERROR :: Invalid options used.")
             call_help()
             exit()
         else:
             FILE=item
+    if not os.path.exists(TMP_DIR):
+        print(f"STOP :: {TMP_DIR} directory does not exist.")
+        logger.error(f"CONFIG: STOP :: TMP_DIR: {TMP_DIR} directory does not exist.")
+        exit(1)
     if ((WHAT is None) or (ACTION is None)):
         print("ERROR :: Instruction incomplete. Required options or flags missing.")
         call_help()
@@ -150,6 +158,7 @@ optional arguments:
                         used for osimage imports and exports. handle with care.
   -h, --help            show this help message and exit.
   -f, --force           do not warn, do not ask, just do it.
+  -t, --tmp             use this directory as tmp dir instead of /tmp. directory has to exist.
 
 examples:
   lexport -c -e /tmp/cluster-config.dat     exports all cluster configuration to /tmp/cluster-config.dat
@@ -374,14 +383,31 @@ def handleImageRequest(action=None,file=None,name=None,path=None,config_file=Non
                     print(f"STOP :: osimage {image_name} already exists. Please use another name or use --force to override")
                     logger.error(f"IMPORT: STOP :: osimage {image_name} already exists")
                     exit(1)
+                # we HAVE to set a fake path as mother will kick in after some time to clean up the old image...
+                fakepath_image_config={'path': '/tmp/__doesnotexist__'}
+                myjson={'config': {'osimage': {image_name: fakepath_image_config}}}
+                r = requests.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/osimage/{image_name}', json=myjson, headers=headers, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
+                logger.info(f"fake path return: {r.status_code}")
+                status_code=str(r.status_code)
+                if status_code not in ['201','204']:
+                    print(f"ERROR :: trouble processing request: {r.text}")
+                    logger.error(f"IMPORT: ERROR :: Error processing request: {r.text}")
+                    exit(2)
+                # now we set the image for deletion
                 r = requests.get(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/osimage/{image_name}/_delete', headers=headers, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
                 logger.info(f"delete return: {r.status_code}")
+                status_code=str(r.status_code)
+                if status_code not in ['201','204']:
+                    print(f"ERROR :: trouble processing request: {r.text}")
+                    logger.error(f"IMPORT: ERROR :: Error processing request: {r.text}")
+                    exit(2)
+                # and create the new image
                 myjson={'config': {'osimage': {image_name: image_config}}}
                 logger.info(f"myjson: {myjson}")
                 r = requests.post(f'{CONF["PROTOCOL"]}://{CONF["ENDPOINT"]}/config/osimage/{image_name}', json=myjson, headers=headers, stream=True, timeout=10, verify=CONF["VERIFY_CERTIFICATE"])
                 logger.info(f"add image returned: {r.status_code}")
                 status_code=str(r.status_code)
-                if status_code == '201':
+                if status_code in ['201','204']:
                     ret=unpack_image(name=image_name,path=image_path,image_file=image_file)
                     if not ret:
                         logger.error(f"IMPORT: ERROR :: Encountered a problem exporting osimage")
@@ -486,10 +512,16 @@ def merge(file=None,image_file=None,tmp_dir=None,config=None):
     return False
 
 def unpack_image(name=None,path=None,image_file=None):
-    if name and image_file:
+    if name and path and image_file:
         packed_image_file=f"{TMP_DIR}/{image_file}"
         if os.path.exists('/usr/bin/lbzip2') and os.path.exists('/usr/bin/tar'):
             try:
+                if not os.path.exists(f'{path}'):
+                    os.makedirs(path)
+                    if not os.path.exists(f'{path}'):
+                        logger.error(f"Image path {path} could not be created")
+                        print(f"Image path {path} could not be created")
+                        return False
                 my_proc = subprocess.Popen(
                     f"cd {path} && /usr/bin/lbzip2 -dc < {packed_image_file} | /usr/bin/tar xf -",
                     stdout=subprocess.PIPE,
@@ -508,6 +540,10 @@ def unpack_image(name=None,path=None,image_file=None):
                 joined='. '.join(outputs[-5:])
                 print(f"Untarring {name} failed with exit code {exc.returncode}: {joined}")
                 logger.error(f"Untarring {name} failed with exit code {exc.returncode}: {joined}")
+                return False
+            except Exception as exp:
+                print(f"Untarring {name} failed: {exp}")
+                logger.error(f"Untarring {name} failed: {exp}")
                 return False
             #print(f"Untarring {name} successful.")
             return True
@@ -537,6 +573,15 @@ def unmerge(file=None):
                     config=json.loads(data)
                 with open(f"{TMP_DIR}/.osimage.dat",'r', encoding = "utf-8") as osimage_file:
                     image_file=osimage_file.read()
+                if image_file:
+                    output = subprocess.check_output(
+                        [
+                            '/usr/bin/tar', '-C', f"{TMP_DIR}",
+                            '-xf', f"{file}",
+                            f'{image_file}'
+                        ],
+                        stderr=subprocess.STDOUT,
+                        universal_newlines=True)
             except subprocess.CalledProcessError as exc:
                 output=f"{exc.output}"
                 outputs=output.split("\n")
@@ -544,10 +589,13 @@ def unmerge(file=None):
                 print(f"Unmerging {file} failed with exit code {exc.returncode}: {joined}")
                 logger.error(f"Unmerging {file} failed with exit code {exc.returncode}: {joined}")
                 return None, None
+            except Exception as exp:
+                print(f"Unmerging {file} failed: {exp}")
+                logger.error(f"Unmerging {file} failed: {exp}")
+                return False
             return config, image_file
         print("tar needs to be installed")
         logger.error("Tar is missing")
-        return False
     return None, None
 
 # ----------------------------------------------------------------------------
