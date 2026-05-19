@@ -92,7 +92,7 @@ setup(
     license = "MIT",
     keywords = [
         "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "slurm", "Trinity",
-        "ClusterVision", "Sumit", "Sumit Sharma"
+        "ClusterVision", "Sumit", "Sumit Sharma", "lconsole"
     ],
     entry_points={
         'console_scripts': [
@@ -102,7 +102,8 @@ setup(
             'lcluster = utils.lcluster:main',
             'lslurm = utils.lslurm:main',
             'lnode = utils.lnode:main',
-            'trix-diag = utils.trinity_diagnosis:main'
+            'trix-diag = utils.trinity_diagnosis:main',
+            'lconsole = utils.lconsole:main'
         ]
     },
     install_requires = get_requirements(),
