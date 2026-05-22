@@ -26,7 +26,7 @@ lconsole v2.5 — stream console output from a TrinityX compute node.
 
 SOL uses a real PTY (os.openpty) so ipmitool/ssh get a genuine TTY on stdin.
 Keystrokes are forwarded byte-for-byte; SIGWINCH propagates terminal resize.
-Type ~. at the start of a line (or Ctrl+C) to exit an interactive session.
+Type <escape>. at the start of a line, or Ctrl+~, to exit an interactive session.
 """
 
 __author__      = 'Dev-team'
@@ -72,7 +72,7 @@ DEFAULT_HANDOFF_GRACE  = 5
 DEFAULT_SOL_CIPHER     = 3
 DEFAULT_READY_MARKER   = 'TRINITYX_LCONSOLE_NETCONSOLE_READY'
 DEFAULT_SOL_FAIL_GRACE = 10
-DEFAULT_SOL_ESCAPE     = '~'   # escape prefix; type <escape>. to exit SOL
+DEFAULT_SOL_ESCAPE     = '!'   # escape prefix for SOL exit; use --sol-escape to override
 IPMI_PREP_TIMEOUT      = 5
 SSH_PROBE_TIMEOUT      = 1
 logger = Log.init_log(log_file=LOG_FILE, log_level='info')
@@ -95,6 +95,11 @@ def _info(msg):
 
 def _warn(msg):
     print(f'\033[33m[lconsole] warning:\033[0m {msg}', flush=True)
+
+
+def _banner(msg):
+    """Orange banner printed once at connection time."""
+    print(f'\033[38;5;214m[lconsole]\033[0m {msg}', flush=True)
 
 
 def node_is_booted(ip, timeout=SSH_PROBE_TIMEOUT):
@@ -255,17 +260,16 @@ class SolBackend:
             pass
 
     def run_interactive(self, escape_char=DEFAULT_SOL_ESCAPE):
-        """Block until the operator exits; escape_char + '.' or Ctrl+C disconnects."""
+        """Block until the operator exits with <escape>+., Ctrl+~, or child exit."""
         esc = escape_char.encode() if isinstance(escape_char, str) else escape_char
         _info(
-            f"Interactive SOL — type \033[1m{escape_char}.\033[0m on a new line  "
-            f"or press \033[1mCtrl+C\033[0m to exit."
+            f"Interactive SOL — type \033[1m{escape_char}.\033[0m on a new line,  "
+            f"or press \033[1mCtrl+~\033[0m to exit."
         )
         self._pty_interactive(esc)
 
     def _pty_interactive(self, esc_prefix=b'~'):
-        """Bidirectional PTY passthrough: stdin→master→node, node→master→stdout.
-        Exits on <esc_prefix>+'.', Ctrl+C, or child exit."""
+        """Bidirectional PTY passthrough. Exits on <esc_prefix>+'.', Ctrl+~, or child exit."""
         proc = getattr(self, 'proc', None)
         if proc is None:
             raise RuntimeError('SOL process not started — call start() first')
@@ -287,11 +291,18 @@ class SolBackend:
         def _on_winch(signum, frame):
             if _slave_ref[0] is not None:
                 self._set_pty_size(_slave_ref[0])
+            self._draw_bar(f' [lconsole] {nodename}  |  BMC: {bmc_ip}  |  SOL  |  !. or Ctrl+~ to exit ')
+            self._pin_top_row()
 
         old_winch = signal.signal(signal.SIGWINCH, _on_winch)
 
         at_line_start  = True
         escape_pending = False
+
+        nodename = getattr(self, 'nodename', '?')
+        bmc_ip   = getattr(self, 'bmc_ip', '?')
+        self._draw_bar(f' [lconsole] {nodename}  |  BMC: {bmc_ip}  |  SOL  |  !. or Ctrl+~ to exit ')
+        self._pin_top_row()
 
         try:
             if old_tc is not None:
@@ -315,6 +326,13 @@ class SolBackend:
 
                     filtered = bytearray()
                     for byte in (bytes([b]) for b in chunk):
+                        # Ctrl+~ (RS, 0x1e) — instant exit, bypass escape state machine
+                        if byte == b'':
+                            if old_tc is not None:
+                                termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
+                                old_tc = None
+                            print('\r\n[lconsole] Ctrl+~ — disconnecting.', flush=True)
+                            return
                         if escape_pending:
                             if byte == b'.':
                                 if old_tc is not None:
@@ -356,13 +374,13 @@ class SolBackend:
         finally:
             _slave_ref[0] = None
             signal.signal(signal.SIGWINCH, old_winch)
+            self._unpin_top_row()
             if old_tc is not None:
                 try:
                     termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
                 except Exception:
                     pass
             self.stop()
-            print('\r\n[lconsole] SOL session ended.', flush=True)
 
     def _open_pty(self):
         """Open a PTY pair; call before Popen(). Child gets slave, parent keeps master."""
@@ -389,6 +407,31 @@ class SolBackend:
             except OSError:
                 pass
             self._master_fd = None
+
+    # ── fixed status bar (tmux-style) ──
+
+    @staticmethod
+    def _draw_bar(msg):
+        """Orange bar with black text pinned at the very top of the terminal."""
+        rows, cols = SolBackend._get_terminal_size()
+        bar = msg.ljust(cols)[:cols]
+        sys.stdout.write(f'\0337\033[1;1H\033[48;5;214m\033[30m{bar}\033[0m\0338')
+        sys.stdout.flush()
+
+    @staticmethod
+    def _pin_top_row():
+        """Reserve the top row for the status bar; all scrolling happens in rows 2..N."""
+        rows, _ = SolBackend._get_terminal_size()
+        if rows > 1:
+            sys.stdout.write(f'\033[2;{rows}r')
+            sys.stdout.flush()
+
+    @staticmethod
+    def _unpin_top_row():
+        """Restore full-screen scroll region and clear the status bar line."""
+        sys.stdout.write('\033[r')
+        sys.stdout.write('\033[1;1H\033[2K')
+        sys.stdout.flush()
 
 # ---------------------------------------------------------------------------
 # IPMI SOL backend
@@ -761,21 +804,16 @@ class LConsole:
     def _start_netconsole_only(self, boot_ip):
         self.net = NetconsoleListener(boot_ip)
         self.net.start()
-        _info(f'netconsole-only | \033[1m{self.nodename}\033[0m ({boot_ip}) '
-              f'→ UDP :{NETCONSOLE_PORT}')
+        SolBackend._draw_bar(f' [lconsole] {self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}  |  Ctrl+C to exit ')
+        SolBackend._pin_top_row()
         print('Waiting for kernel printk messages...\n', flush=True)
 
     def _start_sol_only(self, bmc_ip):
-        _info(f'SOL-only | \033[1m{self.nodename}\033[0m '
-              f'| BMC: {bmc_ip} | backend: {self.sol_backend_name}')
         self.sol = self._build_sol()
         self.sol.start()
-        self.sol.run_interactive(escape_char=self.sol_escape)   # blocks until user exits
+        self.sol.run_interactive(escape_char=self.sol_escape)   # blocks, bar drawn inside
 
     def _start_hybrid(self, boot_ip, bmc_ip):
-        _info(f'\033[1m{self.nodename}\033[0m '
-              f'| boot: {boot_ip} | BMC: {bmc_ip} '
-              f'| backend: {self.sol_backend_name} | netconsole :{NETCONSOLE_PORT}')
         self.net = NetconsoleListener(boot_ip)
         self.net.start()
 
@@ -783,6 +821,8 @@ class LConsole:
         if node_is_booted(boot_ip):
             print('SSH answered — node is up.')
             _info('Node already up — skipping SOL, netconsole-only.')
+            SolBackend._draw_bar(f' [lconsole] {self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}  |  Ctrl+C to exit ')
+            SolBackend._pin_top_row()
             self.mode = 'netconsole'
             return
 
@@ -790,7 +830,8 @@ class LConsole:
 
         if not self.details['bmc_ip'] or not self.details['bmcsetup']:
             _warn('No BMC IP or bmcsetup in Luna — cannot start SOL.')
-            _info(f'Netconsole-only fallback. Waiting up to {self.sol_timeout}s.\n')
+            SolBackend._draw_bar(f' [lconsole] {self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}  |  Ctrl+C to exit ')
+            SolBackend._pin_top_row()
             self.mode = 'netconsole'
             return
 
@@ -806,13 +847,16 @@ class LConsole:
             return
         except Exception as exc:
             _warn(f'SOL start failed: {exc}')
-            _info('Falling back to netconsole-only.\n')
+            SolBackend._draw_bar(f' [lconsole] {self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}  |  Ctrl+C to exit ')
+            SolBackend._pin_top_row()
             self.sol  = None
             self.mode = 'netconsole'
             return
 
         _info(f"SOL active | handoff on marker '{self.ready_marker}' "
               f"or first packet + {self.handoff_grace}s grace.\n")
+        SolBackend._draw_bar(f' [lconsole] {self.nodename}  |  {boot_ip}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} + netconsole :{NETCONSOLE_PORT}  |  Ctrl+C to exit ')
+        SolBackend._pin_top_row()
 
     def _print_event(self, event):
         print(f'[{event.source}] {event.line}', flush=True)
@@ -908,6 +952,7 @@ class LConsole:
         except KeyboardInterrupt:
             print('\n[lconsole] interrupted, exiting.', flush=True)
         finally:
+            SolBackend._unpin_top_row()
             if self.sol is not None:
                 self.sol.stop()
             if self.net is not None:
@@ -936,7 +981,7 @@ def parse_args(argv=None):
     mode.add_argument('--netconsole', action='store_true',
                       help='Netconsole UDP listener only — no SOL')
     mode.add_argument('--sol-only', action='store_true',
-                      help='Interactive SOL only — Ctrl+C exits cleanly')
+                      help='Interactive SOL only')
 
     parser.add_argument('--sol-backend', default='ipmi', choices=['ipmi', 'redfish'],
                         help='SOL backend (default: ipmi; redfish: stub)')
@@ -955,8 +1000,7 @@ def parse_args(argv=None):
                         help='Seconds to wait for netconsole after SOL exits early (default: %(default)s)')
     parser.add_argument('--sol-escape', default=DEFAULT_SOL_ESCAPE,
                         metavar='CHAR',
-                        help='Escape prefix character for interactive SOL exit sequence '
-                             '(type <char>. at start of line to disconnect, default: %(default)r)')
+                        help='Escape char for SOL exit (type <char>. at line start, or Ctrl+~; default: %(default)r)')
     return parser.parse_args(argv)
 
 
@@ -973,6 +1017,14 @@ def main(argv=None):
 
     conf    = Ini.read_ini(ini_file=LUNA_CONFIG_PATH)
     details = resolve_node_details(args.nodename, conf)
+
+    if args.sol_escape == '~' and (os.environ.get('SSH_TTY') or os.environ.get('SSH_CONNECTION')):
+        _warn(
+            'You are connected via SSH and the SOL escape character is "~".\n'
+            '  SSH also uses ~ as its own escape — typing ~. may disconnect\n'
+            '  your SSH session instead of just SOL.  Use --sol-escape to pick\n'
+            '  a different character (e.g. --sol-escape !).'
+        )
 
     app = LConsole(
         nodename         = args.nodename,
