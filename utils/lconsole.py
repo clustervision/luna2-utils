@@ -262,10 +262,6 @@ class SolBackend:
     def run_interactive(self, escape_char=DEFAULT_SOL_ESCAPE):
         """Block until the operator exits with <escape>+., Ctrl+~, or child exit."""
         esc = escape_char.encode() if isinstance(escape_char, str) else escape_char
-        _info(
-            f"Interactive SOL — type \033[1m{escape_char}.\033[0m on a new line,  "
-            f"or press \033[1mCtrl+~\033[0m to exit."
-        )
         self._pty_interactive(esc)
 
     def _pty_interactive(self, esc_prefix=b'~'):
@@ -301,8 +297,6 @@ class SolBackend:
 
         nodename = getattr(self, 'nodename', '?')
         bmc_ip   = getattr(self, 'bmc_ip', '?')
-        self._draw_bar(f' [lconsole] {nodename}  |  BMC: {bmc_ip}  |  SOL  |  !. or Ctrl+~ to exit ')
-        self._pin_top_row()
 
         try:
             if old_tc is not None:
@@ -418,7 +412,14 @@ class SolBackend:
                 pass
             self._master_fd = None
 
-    # ── fixed status bar (tmux-style) ──
+    # ── terminal UI (clear, status bar, scroll regions) ──
+
+    @staticmethod
+    def _clear_screen():
+        sys.stdout.write('\033[2J\033[H')
+        sys.stdout.flush()
+
+    # ── fixed status bar ──
 
     @staticmethod
     def _draw_bar(msg):
@@ -787,6 +788,28 @@ class LConsole:
         self.sol_failed_at     = None
         self.sol_fail_reported = False
 
+    def _bar_label(self):
+        """Build the status-bar label for the current mode."""
+        boot_ip = self.details['boot_ip'] or '?'
+        bmc_ip  = self.details['bmc_ip'] or 'N/A'
+        if self.mode == 'netconsole':
+            body = f'{self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}'
+        elif self.mode == 'sol':
+            body = f'{self.nodename}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} SOL  |  {self.sol_escape}. or Ctrl+~ to exit'
+        else:
+            body = f'{self.nodename}  |  {boot_ip}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} + netconsole :{NETCONSOLE_PORT}'
+        return f' [lconsole] {body} '
+
+    def _setup_ui(self):
+        """Clear screen, draw status bar, pin top row."""
+        SolBackend._clear_screen()
+        SolBackend._draw_bar(self._bar_label())
+        SolBackend._pin_top_row()
+
+    def _redraw_bar(self):
+        """Redraw the status bar (after a mode change)."""
+        SolBackend._draw_bar(self._bar_label())
+
     def _build_sol(self):
         bmc_ip   = self.details['bmc_ip']
         bmcsetup = self.details['bmcsetup']
@@ -812,37 +835,33 @@ class LConsole:
             self._start_hybrid(boot_ip, bmc_ip)
 
     def _start_netconsole_only(self, boot_ip):
+        self._setup_ui()
         self.net = NetconsoleListener(boot_ip)
         self.net.start()
-        SolBackend._draw_bar(f' [lconsole] {self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}  |  Ctrl+C to exit ')
-        SolBackend._pin_top_row()
-        print('Waiting for kernel printk messages...\n', flush=True)
+        _info('Waiting for kernel printk messages...')
 
     def _start_sol_only(self, bmc_ip):
+        self._setup_ui()
         self.sol = self._build_sol()
         self.sol.start()
-        self.sol.run_interactive(escape_char=self.sol_escape)   # blocks, bar drawn inside
+        self.sol.run_interactive(escape_char=self.sol_escape)
 
     def _start_hybrid(self, boot_ip, bmc_ip):
+        self._setup_ui()
         self.net = NetconsoleListener(boot_ip)
         self.net.start()
-
-        print('[lconsole] checking if node is already booted...', end=' ', flush=True)
+        _info('SSH probe...')
         if node_is_booted(boot_ip):
-            print('SSH answered — node is up.')
             _info('Node already up — skipping SOL, netconsole-only.')
-            SolBackend._draw_bar(f' [lconsole] {self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}  |  Ctrl+C to exit ')
-            SolBackend._pin_top_row()
             self.mode = 'netconsole'
+            self._redraw_bar()
             return
-
-        print('no SSH response — node is booting.')
+        _info('No SSH response — node is booting.')
 
         if not self.details['bmc_ip'] or not self.details['bmcsetup']:
-            _warn('No BMC IP or bmcsetup in Luna — cannot start SOL.')
-            SolBackend._draw_bar(f' [lconsole] {self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}  |  Ctrl+C to exit ')
-            SolBackend._pin_top_row()
+            _warn('No BMC IP or bmcsetup — netconsole-only fallback.')
             self.mode = 'netconsole'
+            self._redraw_bar()
             return
 
         _info(f'Starting {self.sol_backend_name.upper()} SOL...')
@@ -851,22 +870,19 @@ class LConsole:
             self.sol.start()
         except NotImplementedError as exc:
             _warn(str(exc))
-            _info('Falling back to netconsole-only.\n')
-            self.sol  = None
+            _info('Falling back to netconsole-only.')
+            self.sol = None
             self.mode = 'netconsole'
+            self._redraw_bar()
             return
         except Exception as exc:
             _warn(f'SOL start failed: {exc}')
-            SolBackend._draw_bar(f' [lconsole] {self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}  |  Ctrl+C to exit ')
-            SolBackend._pin_top_row()
-            self.sol  = None
+            self.sol = None
             self.mode = 'netconsole'
+            self._redraw_bar()
             return
 
-        _info(f"SOL active | handoff on marker '{self.ready_marker}' "
-              f"or first packet + {self.handoff_grace}s grace.\n")
-        SolBackend._draw_bar(f' [lconsole] {self.nodename}  |  {boot_ip}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} + netconsole :{NETCONSOLE_PORT}  |  Ctrl+C to exit ')
-        SolBackend._pin_top_row()
+        _info(f"SOL active — handoff on '{self.ready_marker}' or net +{self.handoff_grace}s.")
 
     def _print_event(self, event):
         print(f'[{event.source}] {event.line}', flush=True)
