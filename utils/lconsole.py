@@ -222,14 +222,25 @@ class NetconsoleListener:
 
 
 class TerminalUI:
-    """Small viewport manager: row 1 is lconsole, rows 2..N are remote SOL."""
+    """
+    Tiny viewport terminal: row 1 is lconsole, rows 2..N are a virtual screen.
+
+    Remote output is parsed into an in-memory buffer first.  Only render()
+    writes to the real terminal, so the remote console cannot overwrite the bar.
+    """
 
     def __init__(self, title=''):
         self.title = title
         self.rows = 24
         self.cols = 80
+        self.vrows = 23
+        self.vcols = 80
         self.active = False
+        self.enabled = sys.stdout.isatty() and os.environ.get('TERM', 'dumb') != 'dumb'
+        self._esc_state = 'normal'
+        self._csi_buf = bytearray()
         self._refresh_size()
+        self._reset_buffer()
 
     def _refresh_size(self):
         try:
@@ -238,79 +249,219 @@ class TerminalUI:
             self.rows, self.cols = rows or 24, cols or 80
         except Exception:
             self.rows, self.cols = 24, 80
+        self.vrows = max(1, self.rows - 1)
+        self.vcols = max(1, self.cols)
 
     def child_size(self):
         self._refresh_size()
-        return max(1, self.rows - 1), self.cols
+        return self.vrows, self.vcols
 
     def setup(self):
+        if not self.enabled:
+            self.active = False
+            return
         self._refresh_size()
-        sys.stdout.write('\033[2J\033[H')
-        self._draw_title()
-        self._pin(move_to_bottom=True)
+        self._reset_buffer()
         self.active = True
-        sys.stdout.flush()
+        sys.stdout.write('\033[?25l\033[2J\033[H')
+        self.render()
 
     def teardown(self):
-        sys.stdout.write('\033[r\033[1;1H\033[2K')
+        if not self.enabled:
+            return
+        sys.stdout.write('\033[0m\033[?25h\033[2J\033[H')
         sys.stdout.flush()
         self.active = False
 
     def redraw(self, title=None):
         if title is not None:
             self.title = title
-        self._refresh_size()
-        self._draw_title()
-        self._pin(move_to_bottom=True)
-        sys.stdout.flush()
+        if self.enabled:
+            self._refresh_size()
+            self._resize_buffer()
+            self.render()
 
-    def _draw_title(self):
-        bar = self.title.ljust(self.cols)[:self.cols]
-        sys.stdout.write(f'\0337\033[1;1H\033[2K\033[48;5;214m\033[30m{bar}\033[0m\0338')
-
-    def _pin(self, move_to_bottom=False):
-        if self.rows > 1:
-            target = self.rows if move_to_bottom else 2
-            sys.stdout.write(f'\033[2;{self.rows}r\033[{target};1H')
+    def write_line(self, msg, source='lconsole'):
+        """Write a local lconsole/status line into the viewport."""
+        text = f'[{source}] {msg}\n'
+        self.write_remote(text.encode('utf-8', errors='replace'))
 
     def write_remote(self, data):
-        """Translate remote terminal control so it cannot target row 1."""
         if not data:
             return
-        data = self._translate(data)
-        if data:
+        if not self.enabled:
             os.write(sys.stdout.fileno(), data)
-        if self.active:
-            self._pin(move_to_bottom=True)
-            sys.stdout.flush()
+            return
+        self.feed(data)
+        self.render()
 
-    def _translate(self, data):
-        # Full terminal resets / alternate-screen switches are hostile to our UI.
-        data = data.replace(b'\x1bc', b'')
-        data = re.sub(br'\x1b\[\?1049[hl]', b'', data)
-        data = re.sub(br'\x1b\[\?47[hl]', b'', data)
-        data = re.sub(br'\x1b\[\?1047[hl]', b'', data)
-        data = re.sub(br'\x1b\[\?1048[hl]', b'', data)
+    def feed(self, data):
+        for b in data:
+            self._feed_byte(b)
 
-        # lconsole owns the real terminal scroll region.
-        data = re.sub(br'\x1b\[[0-9;]*r', b'', data)
+    def render(self):
+        if not self.enabled:
+            return
+        self._refresh_size()
+        self._resize_buffer()
+        out = []
+        out.append('\033[H')
+        out.append(self._title_line())
+        for r in range(self.vrows):
+            out.append(f'\033[{r + 2};1H')
+            out.append(''.join(self.buf[r])[:self.vcols])
+        out.append(f'\033[{self.cur_r + 2};{self.cur_c + 1}H')
+        out.append('\033[?25h')
+        sys.stdout.write(''.join(out))
+        sys.stdout.flush()
 
-        # Prevent obvious attempts to put the cursor on the banner row.
-        data = re.sub(br'\x1b\[H', b'\x1b[2;1H', data)
-        data = re.sub(br'\x1b\[;H', b'\x1b[2;1H', data)
-        data = re.sub(br'\x1b\[1;(\d+)([Hf])',
-                      lambda m: b'\x1b[2;' + m.group(1) + m.group(2), data)
-        data = re.sub(br'\x1b\[1([Hf])',
-                      lambda m: b'\x1b[2;1' + m.group(1), data)
+    def _title_line(self):
+        bar = self.title.ljust(self.cols)[:self.cols]
+        return f'\033[48;5;214m\033[30m{bar}\033[0m'
 
-        # Clear viewport only, not the banner.
-        data = re.sub(br'\x1b\[(?:2|3)?J', self._clear_viewport_seq(), data)
-        return data
+    def _reset_buffer(self):
+        self.buf = [[' '] * self.vcols for _ in range(self.vrows)]
+        self.cur_r = 0
+        self.cur_c = 0
+        self._esc_state = 'normal'
+        self._csi_buf = bytearray()
 
-    def _clear_viewport_seq(self):
-        if self.rows <= 1:
-            return b''
-        return f'\033[2;1H\033[J'.encode()
+    def _resize_buffer(self):
+        if len(getattr(self, 'buf', [])) == self.vrows and len(self.buf[0]) == self.vcols:
+            return
+        old = getattr(self, 'buf', [])
+        new = [[' '] * self.vcols for _ in range(self.vrows)]
+        copy_rows = min(len(old), self.vrows)
+        for r in range(copy_rows):
+            if old:
+                copy_cols = min(len(old[r]), self.vcols)
+                new[r][:copy_cols] = old[r][:copy_cols]
+        self.buf = new
+        self.cur_r = min(getattr(self, 'cur_r', 0), self.vrows - 1)
+        self.cur_c = min(getattr(self, 'cur_c', 0), self.vcols - 1)
+
+    def _feed_byte(self, b):
+        if self._esc_state == 'normal':
+            if b == 0x1b:
+                self._esc_state = 'esc'
+            else:
+                self._control_or_print(b)
+            return
+
+        if self._esc_state == 'esc':
+            if b == ord('['):
+                self._esc_state = 'csi'
+                self._csi_buf.clear()
+            elif b == ord('c'):
+                self._reset_buffer()
+            else:
+                self._esc_state = 'normal'
+            return
+
+        if self._esc_state == 'csi':
+            self._csi_buf.append(b)
+            if 0x40 <= b <= 0x7e:
+                final = chr(b)
+                params = self._csi_buf[:-1].decode('ascii', errors='ignore')
+                self._handle_csi(params, final)
+                self._esc_state = 'normal'
+
+    def _control_or_print(self, b):
+        if b == 0x07:      # BEL
+            return
+        if b == 0x08:      # BS
+            self.cur_c = max(0, self.cur_c - 1)
+            return
+        if b == 0x09:      # TAB
+            self.cur_c = min(self.vcols - 1, ((self.cur_c // 8) + 1) * 8)
+            return
+        if b == 0x0d:      # CR
+            self.cur_c = 0
+            return
+        if b == 0x0a:      # LF
+            self._newline()
+            return
+        if b < 0x20 or b == 0x7f:
+            return
+        self._put_char(chr(b))
+
+    def _put_char(self, ch):
+        if 0 <= self.cur_r < self.vrows and 0 <= self.cur_c < self.vcols:
+            self.buf[self.cur_r][self.cur_c] = ch
+        self.cur_c += 1
+        if self.cur_c >= self.vcols:
+            self.cur_c = 0
+            self._newline()
+
+    def _newline(self):
+        self.cur_r += 1
+        if self.cur_r >= self.vrows:
+            self.buf.pop(0)
+            self.buf.append([' '] * self.vcols)
+            self.cur_r = self.vrows - 1
+        self.cur_c = min(self.cur_c, self.vcols - 1)
+
+    def _handle_csi(self, params, final):
+        parts = self._parse_params(params)
+        if final in ('H', 'f'):
+            row = (parts[0] if len(parts) >= 1 and parts[0] else 1) - 1
+            col = (parts[1] if len(parts) >= 2 and parts[1] else 1) - 1
+            self.cur_r = max(0, min(self.vrows - 1, row))
+            self.cur_c = max(0, min(self.vcols - 1, col))
+        elif final == 'A':
+            self.cur_r = max(0, self.cur_r - (parts[0] or 1))
+        elif final == 'B':
+            self.cur_r = min(self.vrows - 1, self.cur_r + (parts[0] or 1))
+        elif final == 'C':
+            self.cur_c = min(self.vcols - 1, self.cur_c + (parts[0] or 1))
+        elif final == 'D':
+            self.cur_c = max(0, self.cur_c - (parts[0] or 1))
+        elif final == 'G':
+            self.cur_c = max(0, min(self.vcols - 1, (parts[0] or 1) - 1))
+        elif final == 'K':
+            self._erase_line(parts[0] if parts else 0)
+        elif final == 'J':
+            self._erase_screen(parts[0] if parts else 0)
+        elif final == 'm':
+            pass  # SGR colors ignored in the first stable implementation
+        elif final == 'r':
+            pass  # remote scroll regions ignored; viewport owns display
+
+    def _parse_params(self, params):
+        if not params or params == '?':
+            return []
+        params = params.lstrip('?')
+        out = []
+        for p in params.split(';'):
+            try:
+                out.append(int(p) if p else 0)
+            except ValueError:
+                out.append(0)
+        return out
+
+    def _erase_line(self, mode):
+        if mode == 1:
+            for c in range(0, self.cur_c + 1):
+                self.buf[self.cur_r][c] = ' '
+        elif mode == 2:
+            self.buf[self.cur_r] = [' '] * self.vcols
+        else:
+            for c in range(self.cur_c, self.vcols):
+                self.buf[self.cur_r][c] = ' '
+
+    def _erase_screen(self, mode):
+        if mode == 1:
+            for r in range(0, self.cur_r + 1):
+                end = self.cur_c + 1 if r == self.cur_r else self.vcols
+                for c in range(0, end):
+                    self.buf[r][c] = ' '
+        elif mode in (2, 3):
+            self._reset_buffer()
+        else:
+            for r in range(self.cur_r, self.vrows):
+                start = self.cur_c if r == self.cur_r else 0
+                for c in range(start, self.vcols):
+                    self.buf[r][c] = ' '
 
 # ---------------------------------------------------------------------------
 # SOL backend abstract base
@@ -918,6 +1069,13 @@ class LConsole:
         if self.ui is not None:
             self.ui.redraw(self._bar_label())
 
+    def _log(self, msg, source='lconsole'):
+        """Write local lconsole messages inside the viewport when UI is active."""
+        if self.ui is not None and self.ui.enabled:
+            self.ui.write_line(msg, source=source)
+        else:
+            _info(msg) if source == 'lconsole' else print(f'[{source}] {msg}', flush=True)
+
     def _build_sol(self):
         bmc_ip   = self.details['bmc_ip']
         bmcsetup = self.details['bmcsetup']
@@ -946,7 +1104,7 @@ class LConsole:
         self._setup_ui()
         self.net = NetconsoleListener(boot_ip)
         self.net.start()
-        _info('Waiting for kernel printk messages...')
+        self._log('Waiting for kernel printk messages...')
 
     def _start_sol_only(self, bmc_ip):
         self._setup_ui()
@@ -959,43 +1117,46 @@ class LConsole:
         self._setup_ui()
         self.net = NetconsoleListener(boot_ip)
         self.net.start()
-        _info('SSH probe...')
+        self._log('SSH probe...')
         if node_is_booted(boot_ip):
-            _info('Node already up — skipping SOL, netconsole-only.')
+            self._log('Node already up — skipping SOL, netconsole-only.')
             self.mode = 'netconsole'
             self._redraw_bar()
             return
-        _info('No SSH response — node is booting.')
+        self._log('No SSH response — node is booting.')
 
         if not self.details['bmc_ip'] or not self.details['bmcsetup']:
-            _warn('No BMC IP or bmcsetup — netconsole-only fallback.')
+            self._log('warning: No BMC IP or bmcsetup — netconsole-only fallback.')
             self.mode = 'netconsole'
             self._redraw_bar()
             return
 
-        _info(f'Starting {self.sol_backend_name.upper()} SOL...')
+        self._log(f'Starting {self.sol_backend_name.upper()} SOL...')
         try:
             self.sol = self._build_sol()
             self.sol.ui = self.ui
             self.sol.start()
         except NotImplementedError as exc:
-            _warn(str(exc))
-            _info('Falling back to netconsole-only.')
+            self._log(f'warning: {exc}')
+            self._log('Falling back to netconsole-only.')
             self.sol = None
             self.mode = 'netconsole'
             self._redraw_bar()
             return
         except Exception as exc:
-            _warn(f'SOL start failed: {exc}')
+            self._log(f'warning: SOL start failed: {exc}')
             self.sol = None
             self.mode = 'netconsole'
             self._redraw_bar()
             return
 
-        _info(f"SOL active — handoff on '{self.ready_marker}' or net +{self.handoff_grace}s.")
+        self._log(f"SOL active — handoff on '{self.ready_marker}' or net +{self.handoff_grace}s.")
 
     def _print_event(self, event):
-        print(f'[{event.source}] {event.line}', flush=True)
+        if self.ui is not None and self.ui.enabled:
+            self.ui.write_line(event.line, source=event.source)
+        else:
+            print(f'[{event.source}] {event.line}', flush=True)
 
     def _handle_net_event(self, event):
         self.net_seen = True
@@ -1086,7 +1247,10 @@ class LConsole:
                         self._print_event(ev)
                 self._maybe_handoff()
         except KeyboardInterrupt:
-            print('\n[lconsole] interrupted, exiting.', flush=True)
+            if self.ui is not None and self.ui.enabled:
+                self.ui.write_line('interrupted, exiting.', source='lconsole')
+            else:
+                print('\n[lconsole] interrupted, exiting.', flush=True)
         finally:
             if self.ui is not None:
                 self.ui.teardown()
