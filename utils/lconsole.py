@@ -247,7 +247,7 @@ class TerminalUI:
         self._refresh_size()
         sys.stdout.write('\033[2J\033[H')
         self._draw_title()
-        self._pin()
+        self._pin(move_to_bottom=True)
         self.active = True
         sys.stdout.flush()
 
@@ -261,16 +261,17 @@ class TerminalUI:
             self.title = title
         self._refresh_size()
         self._draw_title()
-        self._pin()
+        self._pin(move_to_bottom=True)
         sys.stdout.flush()
 
     def _draw_title(self):
         bar = self.title.ljust(self.cols)[:self.cols]
         sys.stdout.write(f'\0337\033[1;1H\033[2K\033[48;5;214m\033[30m{bar}\033[0m\0338')
 
-    def _pin(self):
+    def _pin(self, move_to_bottom=False):
         if self.rows > 1:
-            sys.stdout.write(f'\033[2;{self.rows}r\033[2;1H')
+            target = self.rows if move_to_bottom else 2
+            sys.stdout.write(f'\033[2;{self.rows}r\033[{target};1H')
 
     def write_remote(self, data):
         """Translate remote terminal control so it cannot target row 1."""
@@ -280,7 +281,7 @@ class TerminalUI:
         if data:
             os.write(sys.stdout.fileno(), data)
         if self.active:
-            self._pin()
+            self._pin(move_to_bottom=True)
             sys.stdout.flush()
 
     def _translate(self, data):
@@ -291,29 +292,18 @@ class TerminalUI:
         data = re.sub(br'\x1b\[\?1047[hl]', b'', data)
         data = re.sub(br'\x1b\[\?1048[hl]', b'', data)
 
-        # Drop remote DECSTBM so lconsole owns the real terminal scroll region.
+        # lconsole owns the real terminal scroll region.
         data = re.sub(br'\x1b\[[0-9;]*r', b'', data)
 
-        # Map cursor home/absolute-position rows into viewport (remote row 1 -> real row 2).
+        # Prevent obvious attempts to put the cursor on the banner row.
         data = re.sub(br'\x1b\[H', b'\x1b[2;1H', data)
         data = re.sub(br'\x1b\[;H', b'\x1b[2;1H', data)
-        data = re.sub(br'\x1b\[(\d+);(\d+)([Hf])', self._map_cup, data)
-        data = re.sub(br'\x1b\[(\d+)([Hf])', self._map_row_only_cup, data)
+        data = re.sub(br'\x1b\[1;(\d+)([Hf])', br'\x1b[2;\1\2', data)
+        data = re.sub(br'\x1b\[1([Hf])', br'\x1b[2;1\1', data)
 
-        # Rewrite clear-screen to clear viewport only.
+        # Clear viewport only, not the banner.
         data = re.sub(br'\x1b\[(?:2|3)?J', self._clear_viewport_seq(), data)
         return data
-
-    def _map_cup(self, match):
-        row = max(1, int(match.group(1))) + 1
-        col = max(1, int(match.group(2)))
-        cmd = match.group(3).decode('ascii')
-        return f'\033[{row};{col}{cmd}'.encode()
-
-    def _map_row_only_cup(self, match):
-        row = max(1, int(match.group(1))) + 1
-        cmd = match.group(2).decode('ascii')
-        return f'\033[{row};1{cmd}'.encode()
 
     def _clear_viewport_seq(self):
         if self.rows <= 1:
@@ -398,8 +388,9 @@ class SolBackend:
 
         old_winch = signal.signal(signal.SIGWINCH, _on_winch)
 
-        at_line_start  = True
-        escape_pending = False
+        input_at_line_start = True
+        escape_pending     = False
+        user_exited        = False
 
         nodename = getattr(self, 'nodename', '?')
         bmc_ip   = getattr(self, 'bmc_ip', '?')
@@ -436,26 +427,31 @@ class SolBackend:
                                 termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
                                 old_tc = None
                             print('\r\n[lconsole] Ctrl+~ — disconnecting.', flush=True)
+                            user_exited = True
                             return
                         if escape_pending:
                             if byte == b'.':
-                                self._unpin_top_row()
+                                if getattr(self, 'ui', None) is not None:
+                                    self.ui.teardown()
+                                else:
+                                    self._unpin_top_row()
                                 if old_tc is not None:
                                     termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
                                     old_tc = None
                                 print('\r\n[lconsole] escape sequence — disconnecting.',
                                       flush=True)
+                                user_exited = True
                                 return
                             else:
                                 filtered += esc_prefix
                                 filtered += byte
                             escape_pending = False
-                            at_line_start  = False
-                        elif at_line_start and byte == esc_prefix:
+                            input_at_line_start = False
+                        elif input_at_line_start and byte == esc_prefix:
                             escape_pending = True
                         else:
                             filtered += byte
-                            at_line_start = (byte in (b'\r', b'\n'))
+                            input_at_line_start = (byte in (b'\r', b'\n'))
 
                     if filtered:
                         try:
@@ -475,17 +471,17 @@ class SolBackend:
                         self.ui.write_remote(out)
                     else:
                         os.write(sys.stdout.fileno(), out)
-                    at_line_start = out[-1:] in (b'\r', b'\n')
 
         except KeyboardInterrupt:
             pass
         finally:
             _slave_ref[0] = None
             signal.signal(signal.SIGWINCH, old_winch)
-            if getattr(self, 'ui', None) is not None:
-                self.ui.teardown()
-            else:
-                self._unpin_top_row()
+            if not user_exited:
+                if getattr(self, 'ui', None) is not None:
+                    self.ui.teardown()
+                else:
+                    self._unpin_top_row()
             if old_tc is not None:
                 try:
                     termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
