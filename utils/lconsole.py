@@ -375,7 +375,7 @@ class SolBackend:
                     # Re-apply pin in case other escape sequences reset scroll region
                     rows, _ = self._get_terminal_size()
                     if rows > 1:
-                        sys.stdout.write(f'\033[2;{rows}r'.encode())
+                        sys.stdout.write(f'\033[2;{rows}r')
                         sys.stdout.flush()
                     at_line_start = out[-1:] in (b'\r', b'\n')
 
