@@ -327,7 +327,8 @@ class SolBackend:
                     filtered = bytearray()
                     for byte in (bytes([b]) for b in chunk):
                         # Ctrl+~ (RS, 0x1e) — instant exit, bypass escape state machine
-                        if byte == b'':
+                        if byte == b'\x1e':
+                            self._unpin_top_row()
                             if old_tc is not None:
                                 termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
                                 old_tc = None
@@ -335,6 +336,7 @@ class SolBackend:
                             return
                         if escape_pending:
                             if byte == b'.':
+                                self._unpin_top_row()
                                 if old_tc is not None:
                                     termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
                                     old_tc = None
@@ -366,7 +368,15 @@ class SolBackend:
                         break
                     if not out:
                         break
+                    # Strip \033[r scroll-region resets injected by ipmitool/ssh
+                    import re as _re
+                    out = _re.sub(b'\033\[(?:0;)?r', b'', out)
                     os.write(sys.stdout.fileno(), out)
+                    # Re-apply pin in case other escape sequences reset scroll region
+                    rows, _ = self._get_terminal_size()
+                    if rows > 1:
+                        sys.stdout.write(f'\033[2;{rows}r'.encode())
+                        sys.stdout.flush()
                     at_line_start = out[-1:] in (b'\r', b'\n')
 
         except KeyboardInterrupt:
@@ -423,7 +433,7 @@ class SolBackend:
         """Reserve the top row for the status bar; all scrolling happens in rows 2..N."""
         rows, _ = SolBackend._get_terminal_size()
         if rows > 1:
-            sys.stdout.write(f'\033[2;{rows}r')
+            sys.stdout.write(f'\033[2;{rows}r\033[{rows};1H')
             sys.stdout.flush()
 
     @staticmethod
