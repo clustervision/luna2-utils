@@ -298,8 +298,10 @@ class TerminalUI:
         # Prevent obvious attempts to put the cursor on the banner row.
         data = re.sub(br'\x1b\[H', b'\x1b[2;1H', data)
         data = re.sub(br'\x1b\[;H', b'\x1b[2;1H', data)
-        data = re.sub(br'\x1b\[1;(\d+)([Hf])', br'\x1b[2;\1\2', data)
-        data = re.sub(br'\x1b\[1([Hf])', br'\x1b[2;1\1', data)
+        data = re.sub(br'\x1b\[1;(\d+)([Hf])',
+                      lambda m: b'\x1b[2;' + m.group(1) + m.group(2), data)
+        data = re.sub(br'\x1b\[1([Hf])',
+                      lambda m: b'\x1b[2;1' + m.group(1), data)
 
         # Clear viewport only, not the banner.
         data = re.sub(br'\x1b\[(?:2|3)?J', self._clear_viewport_seq(), data)
