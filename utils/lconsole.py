@@ -42,6 +42,7 @@ import fcntl
 import getpass
 import os
 import pty
+import re
 import select
 import signal
 import socket
@@ -219,6 +220,106 @@ class NetconsoleListener:
             self.sock = None
 
 
+
+class TerminalUI:
+    """Small viewport manager: row 1 is lconsole, rows 2..N are remote SOL."""
+
+    def __init__(self, title=''):
+        self.title = title
+        self.rows = 24
+        self.cols = 80
+        self.active = False
+        self._refresh_size()
+
+    def _refresh_size(self):
+        try:
+            buf = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b'\x00' * 8)
+            rows, cols = struct.unpack('HHHH', buf)[:2]
+            self.rows, self.cols = rows or 24, cols or 80
+        except Exception:
+            self.rows, self.cols = 24, 80
+
+    def child_size(self):
+        self._refresh_size()
+        return max(1, self.rows - 1), self.cols
+
+    def setup(self):
+        self._refresh_size()
+        sys.stdout.write('\033[2J\033[H')
+        self._draw_title()
+        self._pin()
+        self.active = True
+        sys.stdout.flush()
+
+    def teardown(self):
+        sys.stdout.write('\033[r\033[1;1H\033[2K')
+        sys.stdout.flush()
+        self.active = False
+
+    def redraw(self, title=None):
+        if title is not None:
+            self.title = title
+        self._refresh_size()
+        self._draw_title()
+        self._pin()
+        sys.stdout.flush()
+
+    def _draw_title(self):
+        bar = self.title.ljust(self.cols)[:self.cols]
+        sys.stdout.write(f'\0337\033[1;1H\033[2K\033[48;5;214m\033[30m{bar}\033[0m\0338')
+
+    def _pin(self):
+        if self.rows > 1:
+            sys.stdout.write(f'\033[2;{self.rows}r\033[2;1H')
+
+    def write_remote(self, data):
+        """Translate remote terminal control so it cannot target row 1."""
+        if not data:
+            return
+        data = self._translate(data)
+        if data:
+            os.write(sys.stdout.fileno(), data)
+        if self.active:
+            self._pin()
+            sys.stdout.flush()
+
+    def _translate(self, data):
+        # Full terminal resets / alternate-screen switches are hostile to our UI.
+        data = data.replace(b'\x1bc', b'')
+        data = re.sub(br'\x1b\[\?1049[hl]', b'', data)
+        data = re.sub(br'\x1b\[\?47[hl]', b'', data)
+        data = re.sub(br'\x1b\[\?1047[hl]', b'', data)
+        data = re.sub(br'\x1b\[\?1048[hl]', b'', data)
+
+        # Drop remote DECSTBM so lconsole owns the real terminal scroll region.
+        data = re.sub(br'\x1b\[[0-9;]*r', b'', data)
+
+        # Map cursor home/absolute-position rows into viewport (remote row 1 -> real row 2).
+        data = re.sub(br'\x1b\[H', b'\x1b[2;1H', data)
+        data = re.sub(br'\x1b\[;H', b'\x1b[2;1H', data)
+        data = re.sub(br'\x1b\[(\d+);(\d+)([Hf])', self._map_cup, data)
+        data = re.sub(br'\x1b\[(\d+)([Hf])', self._map_row_only_cup, data)
+
+        # Rewrite clear-screen to clear viewport only.
+        data = re.sub(br'\x1b\[(?:2|3)?J', self._clear_viewport_seq(), data)
+        return data
+
+    def _map_cup(self, match):
+        row = max(1, int(match.group(1))) + 1
+        col = max(1, int(match.group(2)))
+        cmd = match.group(3).decode('ascii')
+        return f'\033[{row};{col}{cmd}'.encode()
+
+    def _map_row_only_cup(self, match):
+        row = max(1, int(match.group(1))) + 1
+        cmd = match.group(2).decode('ascii')
+        return f'\033[{row};1{cmd}'.encode()
+
+    def _clear_viewport_seq(self):
+        if self.rows <= 1:
+            return b''
+        return f'\033[2;1H\033[J'.encode()
+
 # ---------------------------------------------------------------------------
 # SOL backend abstract base
 # ---------------------------------------------------------------------------
@@ -249,11 +350,13 @@ class SolBackend:
         except Exception:
             return 24, 80
 
-    @staticmethod
-    def _set_pty_size(slave_fd):
-        """Propagate the operator's terminal size to the PTY slave (TIOCSWINSZ)."""
+    def _set_pty_size(self, slave_fd):
+        """Propagate viewport size to the PTY slave (status row excluded)."""
         try:
-            rows, cols = SolBackend._get_terminal_size()
+            if getattr(self, 'ui', None) is not None:
+                rows, cols = self.ui.child_size()
+            else:
+                rows, cols = SolBackend._get_terminal_size()
             buf = struct.pack('HHHH', rows, cols, 0, 0)
             fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, buf)
         except Exception:
@@ -287,8 +390,11 @@ class SolBackend:
         def _on_winch(signum, frame):
             if _slave_ref[0] is not None:
                 self._set_pty_size(_slave_ref[0])
-            self._draw_bar(f' [lconsole] {nodename}  |  BMC: {bmc_ip}  |  SOL  |  !. or Ctrl+~ to exit ')
-            self._pin_top_row()
+            if getattr(self, 'ui', None) is not None:
+                self.ui.redraw()
+            else:
+                self._draw_bar(f' [lconsole] {nodename}  |  BMC: {bmc_ip}  |  SOL  |  !. or Ctrl+~ to exit ')
+                self._pin_top_row()
 
         old_winch = signal.signal(signal.SIGWINCH, _on_winch)
 
@@ -322,7 +428,10 @@ class SolBackend:
                     for byte in (bytes([b]) for b in chunk):
                         # Ctrl+~ (RS, 0x1e) — instant exit, bypass escape state machine
                         if byte == b'\x1e':
-                            self._unpin_top_row()
+                            if getattr(self, 'ui', None) is not None:
+                                self.ui.teardown()
+                            else:
+                                self._unpin_top_row()
                             if old_tc is not None:
                                 termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
                                 old_tc = None
@@ -362,15 +471,10 @@ class SolBackend:
                         break
                     if not out:
                         break
-                    # Strip \033[r scroll-region resets injected by ipmitool/ssh
-                    import re as _re
-                    out = _re.sub(b'\033\[(?:0;)?r', b'', out)
-                    os.write(sys.stdout.fileno(), out)
-                    # Re-apply pin in case other escape sequences reset scroll region
-                    rows, _ = self._get_terminal_size()
-                    if rows > 1:
-                        sys.stdout.write(f'\033[2;{rows}r')
-                        sys.stdout.flush()
+                    if getattr(self, 'ui', None) is not None:
+                        self.ui.write_remote(out)
+                    else:
+                        os.write(sys.stdout.fileno(), out)
                     at_line_start = out[-1:] in (b'\r', b'\n')
 
         except KeyboardInterrupt:
@@ -378,7 +482,10 @@ class SolBackend:
         finally:
             _slave_ref[0] = None
             signal.signal(signal.SIGWINCH, old_winch)
-            self._unpin_top_row()
+            if getattr(self, 'ui', None) is not None:
+                self.ui.teardown()
+            else:
+                self._unpin_top_row()
             if old_tc is not None:
                 try:
                     termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
@@ -457,6 +564,7 @@ class IpmiSolBackend(SolBackend):
         self.bmcsetup   = bmcsetup
         self.cipher     = cipher
         self.proc       = None
+        self.ui         = None
         self._prep_done = threading.Event()
 
     def _env(self):
@@ -582,6 +690,7 @@ class RedfishSolBackend(SolBackend):
         self.bmcsetup    = bmcsetup
         self._system_path_override = system_path
         self.proc        = None
+        self.ui          = None
         self._ssh_port   = None   
 
     # --- Redfish discovery ---
@@ -787,6 +896,7 @@ class LConsole:
         self.start_time        = None
         self.sol_failed_at     = None
         self.sol_fail_reported = False
+        self.ui                = None
 
     def _bar_label(self):
         """Build the status-bar label for the current mode."""
@@ -801,14 +911,14 @@ class LConsole:
         return f' [lconsole] {body} '
 
     def _setup_ui(self):
-        """Clear screen, draw status bar, pin top row."""
-        SolBackend._clear_screen()
-        SolBackend._draw_bar(self._bar_label())
-        SolBackend._pin_top_row()
+        """Clear screen and create a protected viewport below the status bar."""
+        self.ui = TerminalUI(self._bar_label())
+        self.ui.setup()
 
     def _redraw_bar(self):
         """Redraw the status bar (after a mode change)."""
-        SolBackend._draw_bar(self._bar_label())
+        if self.ui is not None:
+            self.ui.redraw(self._bar_label())
 
     def _build_sol(self):
         bmc_ip   = self.details['bmc_ip']
@@ -843,6 +953,7 @@ class LConsole:
     def _start_sol_only(self, bmc_ip):
         self._setup_ui()
         self.sol = self._build_sol()
+        self.sol.ui = self.ui
         self.sol.start()
         self.sol.run_interactive(escape_char=self.sol_escape)
 
@@ -867,6 +978,7 @@ class LConsole:
         _info(f'Starting {self.sol_backend_name.upper()} SOL...')
         try:
             self.sol = self._build_sol()
+            self.sol.ui = self.ui
             self.sol.start()
         except NotImplementedError as exc:
             _warn(str(exc))
@@ -978,7 +1090,8 @@ class LConsole:
         except KeyboardInterrupt:
             print('\n[lconsole] interrupted, exiting.', flush=True)
         finally:
-            SolBackend._unpin_top_row()
+            if self.ui is not None:
+                self.ui.teardown()
             if self.sol is not None:
                 self.sol.stop()
             if self.net is not None:
