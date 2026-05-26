@@ -26,7 +26,7 @@ lconsole v2.5 — stream console output from a TrinityX compute node.
 
 SOL uses a real PTY (os.openpty) so ipmitool/ssh get a genuine TTY on stdin.
 Keystrokes are forwarded byte-for-byte; SIGWINCH propagates terminal resize.
-Type <escape>. at the start of a line, or Ctrl+^, to exit an interactive session.
+Type <escape>.. at the start of a line to exit an interactive session.
 """
 
 __author__      = 'Dev-team'
@@ -292,7 +292,7 @@ class TerminalUI:
 
     def write_line(self, msg, source='lconsole'):
         """Write a local lconsole/status line into the viewport."""
-        text = f'[{source}] {msg}\n'
+        text = f'[{source}] {msg}\r\n'
         self.write_remote(text.encode('utf-8', errors='replace'))
 
     def write_remote(self, data):
@@ -515,12 +515,12 @@ class SolBackend:
             pass
 
     def run_interactive(self, escape_char=DEFAULT_SOL_ESCAPE):
-        """Block until the operator exits with <escape>+., Ctrl+^, or child exit."""
+        """Block until the operator exits with <escape>+'..' or child exit."""
         esc = escape_char.encode() if isinstance(escape_char, str) else escape_char
         self._pty_interactive(esc)
 
     def _pty_interactive(self, esc_prefix=b'~'):
-        """Bidirectional PTY passthrough. Exits on <esc_prefix>+'.', Ctrl+^, or child exit."""
+        """Bidirectional PTY passthrough. Exits on <esc_prefix>+'..' or child exit."""
         proc = getattr(self, 'proc', None)
         if proc is None:
             raise RuntimeError('SOL process not started — call start() first')
@@ -545,13 +545,13 @@ class SolBackend:
             if getattr(self, 'ui', None) is not None:
                 self.ui.redraw()
             else:
-                self._draw_bar(f' [lconsole] {nodename}  |  BMC: {bmc_ip}  |  SOL  |  !. or Ctrl+^ to exit ')
+                self._draw_bar(f' [lconsole] {nodename}  |  BMC: {bmc_ip}  |  SOL  |  {esc_prefix.decode(errors="replace")}.. to exit ')
                 self._pin_top_row()
 
         old_winch = signal.signal(signal.SIGWINCH, _on_winch)
 
         input_at_line_start = True
-        escape_pending     = False
+        escape_seen        = 0
         user_exited        = False
         exit_requested     = False
         exit_reason        = None
@@ -581,23 +581,20 @@ class SolBackend:
 
                     filtered = bytearray()
                     for b in chunk:
-                        if b == 0x1e:
-                            exit_requested = True
-                            exit_reason = 'Ctrl+^'
-                            break
-
                         byte = bytes([b])
-                        if escape_pending:
+                        if escape_seen:
                             if byte == b'.':
-                                exit_requested = True
-                                exit_reason = 'escape sequence'
-                                break
-                            filtered += esc_prefix
-                            filtered += byte
-                            escape_pending = False
-                            input_at_line_start = False
+                                escape_seen += 1
+                                if escape_seen == 3:
+                                    exit_requested = True
+                                    exit_reason = 'escape sequence'
+                                    break
+                            else:
+                                filtered += esc_prefix + (b'.' * max(0, escape_seen - 1)) + byte
+                                escape_seen = 0
+                                input_at_line_start = False
                         elif input_at_line_start and byte == esc_prefix:
-                            escape_pending = True
+                            escape_seen = 1
                         else:
                             filtered += byte
                             input_at_line_start = (byte in (b'\r', b'\n'))
@@ -1050,12 +1047,13 @@ class LConsole:
         """Build the status-bar label for the current mode."""
         boot_ip = self.details['boot_ip'] or '?'
         bmc_ip  = self.details['bmc_ip'] or 'N/A'
+        escape = f'{self.sol_escape}.. to exit'
         if self.mode == 'netconsole':
-            body = f'{self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}'
+            body = f'{self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}  |  {escape}'
         elif self.mode == 'sol':
-            body = f'{self.nodename}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} SOL  |  {self.sol_escape}. or Ctrl+^ to exit'
+            body = f'{self.nodename}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} SOL  |  {escape}'
         else:
-            body = f'{self.nodename}  |  {boot_ip}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} + netconsole :{NETCONSOLE_PORT}'
+            body = f'{self.nodename}  |  {boot_ip}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} + netconsole :{NETCONSOLE_PORT}  |  {escape}'
         return f' [lconsole] {body} '
 
     def _setup_ui(self):
@@ -1229,9 +1227,14 @@ class LConsole:
     def loop(self):
         if self.mode == 'sol':
             return
+        exit_seen = 0
+        fd_in = sys.stdin.fileno()
+        old_tc = termios.tcgetattr(fd_in) if os.isatty(fd_in) else None
         try:
+            if old_tc is not None:
+                tty.setcbreak(fd_in)
             while True:
-                fds    = []
+                fds    = [fd_in]
                 sol_fd = None
                 if self.net is not None:
                     fds.append(self.net.fileno())
@@ -1244,6 +1247,21 @@ class LConsole:
                     self._maybe_handoff()
                     continue
                 ready, _, _ = select.select(fds, [], [], 1.0)
+                if fd_in in ready:
+                    data = os.read(fd_in, 32)
+                    for b in data:
+                        byte = bytes([b])
+                        if exit_seen:
+                            if byte == b'.':
+                                exit_seen += 1
+                                if exit_seen == 3:
+                                    if self.ui is not None and self.ui.enabled:
+                                        self.ui.write_line('escape sequence — exiting.', source='lconsole')
+                                    return
+                            else:
+                                exit_seen = 0
+                        elif byte == self.sol_escape.encode():
+                            exit_seen = 1
                 if self.net is not None and self.net.fileno() in ready:
                     for ev in self.net.read_events():
                         self._handle_net_event(ev)
@@ -1257,6 +1275,11 @@ class LConsole:
             else:
                 print('\n[lconsole] interrupted, exiting.', flush=True)
         finally:
+            if old_tc is not None:
+                try:
+                    termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
+                except Exception:
+                    pass
             if self.ui is not None:
                 self.ui.teardown()
             if self.sol is not None:
@@ -1306,7 +1329,7 @@ def parse_args(argv=None):
                         help='Seconds to wait for netconsole after SOL exits early (default: %(default)s)')
     parser.add_argument('--sol-escape', default=DEFAULT_SOL_ESCAPE,
                         metavar='CHAR',
-                        help='Escape char for SOL exit (type <char>. at line start, or Ctrl+^; default: %(default)r)')
+                        help='Escape char for exit (type <char>.. at line start; default: %(default)r)')
     return parser.parse_args(argv)
 
 
