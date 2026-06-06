@@ -243,7 +243,7 @@ def find_free(slots, height, size, order):
 
 
 def render_rack(name, rack):
-    """Render a rack as a Rack-View-style ASCII elevation."""
+    """Render a rack as a Rack-View-style ASCII elevation (shaded slots, device bars)."""
     size = int(rack.get('size') or DEFAULT_SIZE)
     order = rack.get('order') or 'ascending'
     devices = rack.get('devices', [])
@@ -257,30 +257,36 @@ def render_rack(name, rack):
         for unit in range(position, position + height):
             occupies[unit] = device
 
-    width = 44
-    border = '+----+' + '-' * (width + 2) + '+'
-    header = (f"{name}  (site: {rack.get('site') or '-'}, room: {rack.get('room') or '-'}, "
-              f"{size}U, {order})")
-    lines = ['', _color(header, 'cyan', ['bold']), border]
+    name_w, type_w, vendor_w, size_w = 15, 13, 13, 4
+    field_w = name_w + type_w + vendor_w + size_w
+    width = field_w + 3
+    header = (f"{name}   ·  site {rack.get('site') or '-'}  ·  "
+              f"room {rack.get('room') or '-'}  ·  {size}U  ·  {order}")
+    lines = ['', _color(header, 'cyan', ['bold']),
+             '     ┌' + '─' * width + '┐']
     units = range(size, 0, -1) if order != 'descending' else range(1, size + 1)
     for unit in units:
         device = occupies.get(unit)
+        tag = ''
         if device is None:
-            cell = ' ' * width
+            body = '░' * width
         else:
             if int(device.get('position')) == unit:
                 height = int(device.get('height') or DEFAULT_HEIGHT)
-                text = (f"{device['name']}  {device['type']}  "
-                        f"{device.get('vendor') or '-'}  ({height}U) "
-                        f"{device.get('orientation') or 'front'}")
+                fields = (device['name'][:name_w].ljust(name_w) +
+                          device['type'][:type_w].ljust(type_w) +
+                          (device.get('vendor') or '-')[:vendor_w].ljust(vendor_w) +
+                          f'{height}U'.ljust(size_w))
+                body = '██ ' + fields[:field_w]
+                tag = ('  ◀ back' if device.get('orientation') == 'back'
+                       else '  ▶ front')
             else:
-                text = '  ...'
-            cell = text[:width].ljust(width)
-            cell = _color(cell, 'yellow' if device.get('orientation') == 'back' else 'green')
-        lines.append(f"| {unit:>2} | {cell} |")
-    lines.append(border)
+                body = '██' + ' ' * (width - 2)
+            body = _color(body, 'yellow' if device.get('orientation') == 'back' else 'green')
+        lines.append(f'  {unit:>2} │{body}│{tag}')
+    lines.append('     └' + '─' * width + '┘')
     used = sum(int(d.get('height') or DEFAULT_HEIGHT) for d in devices)
-    lines.append(f"used {used}U / free {size - used}U   devices: {len(devices)}")
+    lines.append(f'     used {used}U  ·  free {size - used}U  ·  {len(devices)} devices')
     return '\n'.join(lines)
 
 
