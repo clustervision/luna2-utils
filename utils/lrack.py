@@ -37,6 +37,7 @@ __status__      = 'Development'
 import os
 import sys
 import json
+import shutil
 import logging
 import getpass
 import argparse
@@ -242,13 +243,10 @@ def find_free(slots, height, size, order):
     return None
 
 
-def render_rack(name, rack):
-    """Render a rack as a Rack-View-style ASCII elevation (shaded slots, device bars)."""
-    size = int(rack.get('size') or DEFAULT_SIZE)
-    order = rack.get('order') or 'ascending'
-    devices = rack.get('devices', [])
+def _occupies(rack):
+    """Map each occupied U position to the device sitting there."""
     occupies = {}
-    for device in devices:
+    for device in rack.get('devices', []):
         position = device.get('position')
         if not position:
             continue
@@ -256,6 +254,25 @@ def render_rack(name, rack):
         height = int(device.get('height') or DEFAULT_HEIGHT)
         for unit in range(position, position + height):
             occupies[unit] = device
+    return occupies
+
+
+def _used(rack):
+    """Total U consumed by the devices placed in a rack."""
+    return sum(int(d.get('height') or DEFAULT_HEIGHT) for d in rack.get('devices', []))
+
+
+def _term_width():
+    """Best-effort terminal width, with a sane fallback for pipes."""
+    return shutil.get_terminal_size((100, 24)).columns
+
+
+def render_rack(name, rack):
+    """Render a rack as a Rack-View-style ASCII elevation (shaded slots, device bars)."""
+    size = int(rack.get('size') or DEFAULT_SIZE)
+    order = rack.get('order') or 'ascending'
+    devices = rack.get('devices', [])
+    occupies = _occupies(rack)
 
     name_w, type_w, vendor_w, size_w = 15, 13, 13, 4
     field_w = name_w + type_w + vendor_w + size_w
@@ -285,9 +302,134 @@ def render_rack(name, rack):
             body = _color(body, 'yellow' if device.get('orientation') == 'back' else 'green')
         lines.append(f'  {unit:>2} │{body}│{tag}')
     lines.append('     └' + '─' * width + '┘')
-    used = sum(int(d.get('height') or DEFAULT_HEIGHT) for d in devices)
+    used = _used(rack)
     lines.append(f'     used {used}U  ·  free {size - used}U  ·  {len(devices)} devices')
     return '\n'.join(lines)
+
+
+TYPE_COLORS = {'node': 'green', 'switch': 'cyan',
+               'otherdevices': 'magenta', 'controller': 'blue'}
+
+
+def _type_color(device_type):
+    return TYPE_COLORS.get(device_type, 'white')
+
+
+def _gauge_color(pct):
+    if pct >= 0.9:
+        return 'red'
+    if pct >= 0.7:
+        return 'yellow'
+    return 'green'
+
+
+def render_panel(name, rack):
+    """Render a compact fixed-width elevation for side-by-side display."""
+    size = int(rack.get('size') or DEFAULT_SIZE)
+    order = rack.get('order') or 'ascending'
+    occupies = _occupies(rack)
+    name_w, type_w, size_w = 12, 8, 4
+    field_w = name_w + type_w + size_w
+    width = field_w + 3
+    panel_w = width + 4
+    title = f'{name}  {_used(rack)}/{size}U'
+    lines = [_color(title[:panel_w].ljust(panel_w), 'cyan', ['bold']),
+             '  ┌' + '─' * width + '┐']
+    units = range(size, 0, -1) if order != 'descending' else range(1, size + 1)
+    for unit in units:
+        device = occupies.get(unit)
+        if device is None:
+            body = '░' * width
+        else:
+            if int(device.get('position')) == unit:
+                height = int(device.get('height') or DEFAULT_HEIGHT)
+                fields = (device['name'][:name_w].ljust(name_w) +
+                          device['type'][:type_w].ljust(type_w) +
+                          f'{height}U'.ljust(size_w))
+                body = '██ ' + fields[:field_w]
+            else:
+                body = '██' + ' ' * (width - 2)
+            body = _color(body, 'yellow' if device.get('orientation') == 'back' else 'green')
+        lines.append(f'{unit:>2}│{body}│')
+    lines.append('  └' + '─' * width + '┘')
+    return lines, panel_w
+
+
+def render_columns(racks, width=None, per_row=None):
+    """Render racks as side-by-side elevations, wrapping to bands by terminal width."""
+    width = width or _term_width()
+    gutter = 2
+    panels, panel_w = [], 0
+    for name, rack in racks.items():
+        lines, panel_w = render_panel(name, rack)
+        panels.append(lines)
+    per_band = per_row or max(1, (width + gutter) // (panel_w + gutter))
+    out = []
+    for start in range(0, len(panels), per_band):
+        band = panels[start:start + per_band]
+        height = max(len(panel) for panel in band)
+        padded = [[' ' * panel_w] * (height - len(panel)) + panel for panel in band]
+        for row in range(height):
+            out.append((' ' * gutter).join(panel[row] for panel in padded))
+        out.append('')
+    return '\n'.join(out).rstrip()
+
+
+def render_summary(racks):
+    """Render one fill-gauge line per rack plus totals (scales to many racks)."""
+    gauge_w = 24
+    name_w = min(max(max((len(n) for n in racks), default=6), 6), 20)
+    out, total_used, total_size = [], 0, 0
+    for name, rack in racks.items():
+        size = int(rack.get('size') or DEFAULT_SIZE)
+        used = _used(rack)
+        total_used += used
+        total_size += size
+        pct = used / size if size else 0
+        filled = round(pct * gauge_w)
+        bar = _color('█' * filled, _gauge_color(pct)) + '░' * (gauge_w - filled)
+        loc = f"{rack.get('site') or '-'}/{rack.get('room') or '-'}"
+        out.append(f"  {name[:name_w].ljust(name_w)}  {loc:<12} {size:>3}U  "
+                   f"[{bar}] {pct * 100:>3.0f}%  {len(rack.get('devices', [])):>3} dev")
+    pct = total_used / total_size if total_size else 0
+    out.append(f"  {'─' * name_w}  {len(racks)} racks · {total_used}U used / "
+               f"{total_size}U total · {pct * 100:.0f}%")
+    return '\n'.join(out)
+
+
+def render_map(racks, width=None, per_row=None):
+    """Render a per-U heatmap (2-wide columns), colour by device type, in bands."""
+    width = width or _term_width()
+    items = list(racks.items())
+    sizes = [int(rack.get('size') or DEFAULT_SIZE) for _, rack in items]
+    occ = [_occupies(rack) for _, rack in items]
+    labels = [name for name, _ in items]
+    max_size = max(sizes, default=DEFAULT_SIZE)
+    col_w, gutter, rail = 2, 1, 3
+    per_band = per_row or max(1, (width - rail) // (col_w + gutter))
+    out = []
+    for start in range(0, len(items), per_band):
+        index = range(start, min(start + per_band, len(items)))
+        out.append(' ' * rail + ' '.join(f'{labels[i][-col_w:]:>{col_w}}' for i in index))
+        for unit in range(max_size, 0, -1):
+            cells = []
+            for i in index:
+                if unit > sizes[i]:
+                    cells.append('  ')
+                elif unit in occ[i]:
+                    cells.append(_color('██', _type_color(occ[i][unit]['type'])))
+                else:
+                    cells.append('··')
+            label = f'{unit:>2} ' if (unit % 6 == 0 or unit == 1 or unit == max_size) else '   '
+            out.append(label + ' '.join(cells))
+        out.append(' ' * rail + ' '.join(
+            f'{round(len(occ[i]) / sizes[i] * 100):>2}' for i in index))
+        out.append('')
+    legend = [f'{labels[i][-col_w:]}={labels[i]}' for i in range(len(labels))
+              if len(labels[i]) > col_w]
+    if legend:
+        out.append('  ' + '  '.join(legend))
+    return '\n'.join(out).rstrip()
 
 
 # ---------------------------------------------------------------------------
@@ -313,22 +455,50 @@ def cmd_list(args, rest):
     print(table)
 
 
+def _resolve_show_mode(args, count, explicit):
+    """Pick the level of detail: full / columns / summary / map."""
+    if args.summary:
+        return 'summary'
+    if args.map:
+        return 'map'
+    if args.full:
+        return 'full' if count == 1 else 'columns'
+    if count == 1:
+        return 'full'
+    if explicit or count <= 5:
+        return 'columns'
+    return 'summary'
+
+
 def cmd_show(args, rest):
-    """Show one or more racks and the devices placed in them."""
-    names = args.rack or list(fetch_racks(rest).keys())
+    """Show racks, scaling detail to the number of racks and terminal width."""
+    explicit = bool(args.rack)
+    if explicit:
+        racks = {}
+        for name in args.rack:
+            rack = fetch_racks(rest, name).get(name)
+            if rack is None:
+                warn(f'rack {name} not found')
+            else:
+                racks[name] = rack
+    else:
+        racks = fetch_racks(rest)
     if args.raw:
-        result = {name: fetch_racks(rest, name).get(name, {}) for name in names}
-        print(json.dumps({'config': {'rack': result}}, indent=4))
+        print(json.dumps({'config': {'rack': racks}}, indent=4))
         return
-    if not names:
+    if not racks:
         info('no racks defined')
         return
-    for name in names:
-        rack = fetch_racks(rest, name).get(name)
-        if not rack:
-            warn(f'rack {name} not found')
-            continue
+    mode = _resolve_show_mode(args, len(racks), explicit)
+    if mode == 'summary':
+        print(render_summary(racks))
+    elif mode == 'map':
+        print(render_map(racks, width=args.width, per_row=args.columns))
+    elif mode == 'full':
+        name, rack = next(iter(racks.items()))
         print(render_rack(name, rack))
+    else:
+        print(render_columns(racks, width=args.width, per_row=args.columns))
 
 
 def cmd_add(args, rest):
@@ -534,6 +704,12 @@ def get_parser():
 
     sub = subparsers.add_parser('show', help='show racks and their devices')
     sub.add_argument('rack', nargs='*', help='rack name(s); all racks when omitted').completer = rack_completer
+    group = sub.add_mutually_exclusive_group()
+    group.add_argument('-F', '--full', action='store_true', help='force full elevations')
+    group.add_argument('-s', '--summary', action='store_true', help='force fill-gauge summary')
+    group.add_argument('-M', '--map', action='store_true', help='force per-U heatmap')
+    sub.add_argument('-c', '--columns', type=int, help='racks per row (columns/map modes)')
+    sub.add_argument('-w', '--width', type=int, help='assume this terminal width')
 
     sub = subparsers.add_parser('add', help='create a rack')
     sub.add_argument('name', help='rack name')

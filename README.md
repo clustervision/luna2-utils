@@ -40,9 +40,21 @@ lrack inventory [configured|unconfigured]
 lrack pool                                   # placeable (unconfigured) devices
 ```
 
-DEVICE accepts a hostlist range, e.g. `node[001-010]`. `show` draws an ASCII rack
-elevation. When `place` is given no `-p/--position`, devices auto-fill the first free
-slots (following the rack numbering order).
+DEVICE accepts a hostlist range, e.g. `node[001-010]`. When `place` is given no
+`-p/--position`, devices auto-fill the first free slots (following the rack numbering
+order).
+
+`show` scales its detail to the number of racks and the terminal width:
+
+| Racks | View |
+|-------|------|
+| 1     | full ASCII elevation |
+| 2–5   | side-by-side elevations (wrap to bands) |
+| >5    | one fill-gauge line per rack + totals |
+
+Named racks (`lrack show a01 a02`) always render as elevations. Force a level with
+`-F/--full`, `-s/--summary`, `-M/--map` (per-U heatmap), and tune layout with
+`-c/--columns N` and `-w/--width N`.
 
 ### Easy syntax
 
