@@ -91,8 +91,8 @@ setup(
     packages = ['utils'],
     license = "MIT",
     keywords = [
-        "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "slurm", "Trinity",
-        "ClusterVision", "Sumit", "Sumit Sharma"
+        "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "lrack", "slurm",
+        "Trinity", "ClusterVision", "Sumit", "Sumit Sharma"
     ],
     entry_points={
         'console_scripts': [
@@ -102,13 +102,14 @@ setup(
             'lcluster = utils.lcluster:main',
             'lslurm = utils.lslurm:main',
             'lnode = utils.lnode:main',
+            'lrack = utils.lrack:main',
             'trix-diag = utils.trinity_diagnosis:main'
         ]
     },
     install_requires = get_requirements(),
     dependency_links = [],
     package_data = {
-        "utils": ["*", "*.tclsh", "*.ini", "*.lchroot"]
+        "utils": ["*", "*.tclsh", "*.ini", "*.lchroot", "addons/*"]
     },
     data_files = [],
     zip_safe = False,
