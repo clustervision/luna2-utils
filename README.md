@@ -32,7 +32,7 @@ lrack add RACK [-s 42] [-d ascending] [-m ROOM] [-t SITE]
 lrack change RACK [-s ...] [-d ...] [-m ...] [-t ...]
 lrack rename RACK NEWNAME
 lrack remove RACK
-lrack place DEVICE -r RACK -p U [-o front|back] [-H U] [-f]
+lrack place DEVICE -r RACK [-p U] [-o front|back] [-H U] [-f]   # -p omitted: auto-stack
 lrack unplace DEVICE
 lrack resize DEVICE -H U
 lrack orient DEVICE -o front|back
@@ -40,7 +40,20 @@ lrack inventory [configured|unconfigured]
 lrack pool                                   # placeable (unconfigured) devices
 ```
 
-DEVICE accepts a hostlist range, e.g. `node[001-010]`.
+DEVICE accepts a hostlist range, e.g. `node[001-010]`. `show` draws an ASCII rack
+elevation. When `place` is given no `-p/--position`, devices auto-fill the first free
+slots (following the rack numbering order).
+
+### Easy syntax
+
+For quick, scriptable changes there is a positional shorthand:
+
+```
+lrack node[001-020] in rack01            # place, auto-stacking into free slots
+lrack node001 in rack01 at 5 back        # place at U5, orientation back
+lrack node001 out                        # unplace
+lrack rack01                             # bare rack name: show its elevation
+```
 
 ### Command-line completion
 

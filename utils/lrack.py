@@ -63,6 +63,8 @@ ORIENTATIONS = ['front', 'back']
 ORDERS = ['ascending', 'descending']
 DEFAULT_SIZE = 42
 DEFAULT_HEIGHT = 1
+SUBCOMMANDS = ('list', 'show', 'add', 'change', 'rename', 'remove', 'place',
+               'unplace', 'resize', 'orient', 'inventory', 'pool')
 
 urllib3.disable_warnings()
 logger = logging.getLogger('lrack')
@@ -229,6 +231,59 @@ def occupied_slots(devices, ignore=None):
     return slots
 
 
+def find_free(slots, height, size, order):
+    """Find the first free U run of `height`, following the rack numbering order."""
+    starts = range(1, size - height + 2)
+    if order == 'descending':
+        starts = range(size - height + 1, 0, -1)
+    for start in starts:
+        if all((start + offset) not in slots for offset in range(height)):
+            return start
+    return None
+
+
+def render_rack(name, rack):
+    """Render a rack as a Rack-View-style ASCII elevation."""
+    size = int(rack.get('size') or DEFAULT_SIZE)
+    order = rack.get('order') or 'ascending'
+    devices = rack.get('devices', [])
+    occupies = {}
+    for device in devices:
+        position = device.get('position')
+        if not position:
+            continue
+        position = int(position)
+        height = int(device.get('height') or DEFAULT_HEIGHT)
+        for unit in range(position, position + height):
+            occupies[unit] = device
+
+    width = 44
+    border = '+----+' + '-' * (width + 2) + '+'
+    header = (f"{name}  (site: {rack.get('site') or '-'}, room: {rack.get('room') or '-'}, "
+              f"{size}U, {order})")
+    lines = ['', _color(header, 'cyan', ['bold']), border]
+    units = range(size, 0, -1) if order != 'descending' else range(1, size + 1)
+    for unit in units:
+        device = occupies.get(unit)
+        if device is None:
+            cell = ' ' * width
+        else:
+            if int(device.get('position')) == unit:
+                height = int(device.get('height') or DEFAULT_HEIGHT)
+                text = (f"{device['name']}  {device['type']}  "
+                        f"{device.get('vendor') or '-'}  ({height}U) "
+                        f"{device.get('orientation') or 'front'}")
+            else:
+                text = '  ...'
+            cell = text[:width].ljust(width)
+            cell = _color(cell, 'yellow' if device.get('orientation') == 'back' else 'green')
+        lines.append(f"| {unit:>2} | {cell} |")
+    lines.append(border)
+    used = sum(int(d.get('height') or DEFAULT_HEIGHT) for d in devices)
+    lines.append(f"used {used}U / free {size - used}U   devices: {len(devices)}")
+    return '\n'.join(lines)
+
+
 # ---------------------------------------------------------------------------
 # command handlers
 # ---------------------------------------------------------------------------
@@ -267,25 +322,7 @@ def cmd_show(args, rest):
         if not rack:
             warn(f'rack {name} not found')
             continue
-        size = int(rack.get('size') or DEFAULT_SIZE)
-        print(_color(f"\n{name}", 'cyan', ['bold']) +
-              f"  (site: {rack.get('site') or '-'}, room: {rack.get('room') or '-'}, "
-              f"{size}U, {rack.get('order') or 'ascending'})")
-        devices = sorted(rack.get('devices', []),
-                         key=lambda d: int(d.get('position') or 0))
-        if not devices:
-            print('  (empty)')
-            continue
-        table = PrettyTable(['position (U)', 'name', 'type', 'vendor', 'orientation', 'height (U)'])
-        table.align = 'l'
-        for device in devices:
-            position = device.get('position')
-            height = int(device.get('height') or DEFAULT_HEIGHT)
-            span = f'{position}' if height == 1 else f'{position}-{int(position) + height - 1}'
-            table.add_row([span or '-', device['name'], device['type'],
-                           device.get('vendor') or '-',
-                           device.get('orientation') or 'front', height])
-        print(table)
+        print(render_rack(name, rack))
 
 
 def cmd_add(args, rest):
@@ -336,38 +373,43 @@ def cmd_remove(args, rest):
 
 
 def cmd_place(args, rest):
-    """Place one or more devices into a rack, stacking from --position."""
+    """Place device(s) into a rack; stack from --position, or auto-fill free slots."""
     names = expand_devices(args.devices)
     rack = fetch_racks(rest, args.rack).get(args.rack)
     if not rack:
         error_exit(f'rack {args.rack} not found; create it first with: lrack add {args.rack}')
     size = int(rack.get('size') or DEFAULT_SIZE)
+    order = rack.get('order') or 'ascending'
     index = device_index(rest)
     slots = occupied_slots(rack.get('devices', []), ignore=set(names))
-
-    if args.position is None:
-        error_exit('--position is required (automatic stacking arrives in a later phase)')
 
     placed = []
     cursor = args.position
     for name in names:
         device_type = lookup_type(index, name)
         height = args.height if args.height is not None else int(index[name].get('height') or DEFAULT_HEIGHT)
-        top = cursor + height - 1
-        if cursor < 1 or top > size:
-            error_exit(f'{name} ({height}U at U{cursor}) does not fit rack {args.rack} '
+        if args.position is not None:
+            start = cursor
+        else:
+            start = find_free(slots, height, size, order)
+            if start is None:
+                error_exit(f'no free {height}U slot for {name} in rack {args.rack} (size {size}U)')
+        top = start + height - 1
+        if start < 1 or top > size:
+            error_exit(f'{name} ({height}U at U{start}) does not fit rack {args.rack} '
                        f'(size {size}U); placement declined')
-        clash = [slots[u] for u in range(cursor, top + 1) if u in slots]
+        clash = [slots[u] for u in range(start, top + 1) if u in slots]
         if clash and not args.force:
-            error_exit(f'{name} at U{cursor} overlaps {sorted(set(clash))}; '
+            error_exit(f'{name} at U{start} overlaps {sorted(set(clash))}; '
                        f'use --force to override')
-        device = {'name': name, 'type': device_type, 'position': cursor, 'height': height}
+        device = {'name': name, 'type': device_type, 'position': start, 'height': height}
         if args.orientation:
             device['orientation'] = args.orientation
         placed.append(device)
-        for unit in range(cursor, top + 1):
+        for unit in range(start, top + 1):
             slots[unit] = name
-        cursor = top + 1
+        if args.position is not None:
+            cursor = top + 1
 
     payload = {'config': {'rack': {args.rack: {'devices': placed}}}}
     ok, message = rest.post(f'config/rack/{args.rack}', payload)
@@ -505,7 +547,8 @@ def get_parser():
     sub = subparsers.add_parser('place', help='place device(s) into a rack')
     sub.add_argument('devices', help='device name or hostlist (node[001-010])').completer = device_completer
     sub.add_argument('-r', '--rack', required=True, help='target rack').completer = rack_completer
-    sub.add_argument('-p', '--position', type=int, help='starting U position')
+    sub.add_argument('-p', '--position', type=int,
+                     help='starting U position (auto-stack into free slots when omitted)')
     sub.add_argument('-o', '--orientation', choices=ORIENTATIONS, help='device orientation')
     sub.add_argument('-H', '--height', type=int, help='override device height in U')
     sub.add_argument('-f', '--force', action='store_true', help='override overlap warnings')
@@ -546,6 +589,51 @@ HANDLERS = {
 }
 
 
+def rewrite_easy(argv):
+    """Translate the easy positional grammar into canonical subcommand arguments.
+
+        node[001-010] in rack01 at 5 back   ->  place node[001-010] -r rack01 -p 5 -o back
+        node001 out                         ->  unplace node001
+        rack01                              ->  show rack01
+    """
+    lead = []
+    rest = list(argv)
+    while rest and rest[0] in ('-v', '--verbose', '-R', '--raw'):
+        lead.append(rest.pop(0))
+    if not rest or rest[0] in SUBCOMMANDS or rest[0] in ('-h', '--help', '-V', '--version'):
+        return argv
+
+    if 'in' in rest:
+        marker = rest.index('in')
+        if marker == 0 or marker + 1 >= len(rest):
+            return argv
+        out = lead + ['place', rest[marker - 1], '-r', rest[marker + 1]]
+        tail = rest[marker + 2:]
+        index = 0
+        while index < len(tail):
+            word = tail[index]
+            if word == 'at' and index + 1 < len(tail):
+                out += ['-p', tail[index + 1]]
+                index += 2
+            elif word in ORIENTATIONS:
+                out += ['-o', word]
+                index += 1
+            elif word in ('-f', '--force', 'force'):
+                out += ['-f']
+                index += 1
+            else:
+                index += 1
+        return out
+
+    if len(rest) == 2 and rest[1] == 'out':
+        return lead + ['unplace', rest[0]]
+
+    if len(rest) == 1 and not rest[0].startswith('-'):
+        return lead + ['show', rest[0]]
+
+    return argv
+
+
 def _init_logger(verbose):
     """Initialise the file logger, degrading to a null logger without write access."""
     level = 'debug' if verbose else 'info'
@@ -563,7 +651,7 @@ def main():
     """Entry point: parse arguments and dispatch to the matching handler."""
     parser = get_parser()
     argcomplete.autocomplete(parser, always_complete_options=False)
-    args = parser.parse_args()
+    args = parser.parse_args(rewrite_easy(sys.argv[1:]))
 
     global logger
     logger = _init_logger(args.verbose)
