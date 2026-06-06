@@ -30,7 +30,7 @@
 
 _shtab_lrack_subparsers=('list' 'show' 'add' 'change' 'rename' 'remove' 'place' 'unplace' 'resize' 'orient' 'inventory' 'pool')
 
-_shtab_lrack_option_strings=('-h' '--help' '-V' '--version' '-v' '--verbose' '-R' '--raw')
+_shtab_lrack_option_strings=('-h' '--help' '-V' '--version' '-v' '--verbose' '-R' '--raw' '-e' '--export' '-i' '--import' '-r' '--rack' '-f' '--force')
 _shtab_lrack_list_option_strings=('-h' '--help')
 _shtab_lrack_show_option_strings=('-h' '--help' '-F' '--full' '-s' '--summary' '-M' '--map' '-c' '--columns' '-w' '--width')
 _shtab_lrack_add_option_strings=('-h' '--help' '-s' '--size' '-d' '--order' '-m' '--room' '-t' '--site')
@@ -66,6 +66,10 @@ _shtab_lrack__v_nargs=0
 _shtab_lrack___verbose_nargs=0
 _shtab_lrack__R_nargs=0
 _shtab_lrack___raw_nargs=0
+_shtab_lrack__e_nargs=?
+_shtab_lrack___export_nargs=?
+_shtab_lrack__f_nargs=0
+_shtab_lrack___force_nargs=0
 _shtab_lrack_list__h_nargs=0
 _shtab_lrack_list___help_nargs=0
 _shtab_lrack_show_pos_0_nargs=*

@@ -67,6 +67,20 @@ lrack node001 out                        # unplace
 lrack rack01                             # bare rack name: show its elevation
 ```
 
+### Bulk import / export (JSON)
+
+The whole rack layout (and device inventory) round-trips as JSON:
+
+```
+lrack -e                       # export everything to STDOUT
+lrack -e layout.json           # export to a file (-f to overwrite)
+lrack -e -r rack01 rack01.json # export a single rack
+lrack -i layout.json           # import / apply a layout
+```
+
+Import is idempotent (existing racks/devices are updated). A placement that exceeds its
+rack size is declined with an error and nothing is applied; overlaps need `-f/--force`.
+
 ### Command-line completion
 
 Copy `utils/addons/lrack_completion.sh` to `/etc/bash_completion.d/lrack` and start a new

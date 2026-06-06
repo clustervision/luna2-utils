@@ -665,6 +665,76 @@ def _post_inventory(rest, inventory):
         error_exit(message)
 
 
+def cmd_export(args, rest):
+    """Export rack layout (and inventory) as JSON to a file, or STDOUT."""
+    if args.scope_rack:
+        config = dict(fetch_racks(rest, args.scope_rack))
+        if not config:
+            error_exit(f'rack {args.scope_rack} not found')
+    else:
+        config = dict(fetch_racks(rest))
+        inventory = fetch_inventory(rest)
+        if inventory:
+            config['inventory'] = inventory
+    text = json.dumps({'config': {'rack': config}}, indent=4)
+    target = args.export
+    if target == '-':
+        print(text)
+        return
+    if os.path.exists(target) and not args.force:
+        error_exit(f'{target} already exists; use -f/--force to overwrite')
+    with open(target, 'w', encoding='utf-8') as handle:
+        handle.write(text + '\n')
+    info(f'exported to {target}')
+
+
+def _validate_layout(name, rack, force):
+    """Refuse a layout whose placements exceed rack space or overlap."""
+    size = int(rack.get('size') or DEFAULT_SIZE)
+    slots = {}
+    for device in rack.get('devices', []):
+        position = device.get('position')
+        if not position:
+            continue
+        position = int(position)
+        height = int(device.get('height') or DEFAULT_HEIGHT)
+        if position < 1 or position + height - 1 > size:
+            error_exit(f'{name}: {device.get("name")} ({height}U at U{position}) does not '
+                       f'fit rack (size {size}U); import declined')
+        clash = [slots[u] for u in range(position, position + height) if u in slots]
+        if clash and not force:
+            error_exit(f'{name}: {device.get("name")} overlaps {sorted(set(clash))}; '
+                       f'use -f/--force to override')
+        for unit in range(position, position + height):
+            slots[unit] = device.get('name')
+
+
+def cmd_import(args, rest):
+    """Import rack layout (and inventory) from a JSON file and apply it."""
+    path = args.import_file
+    if not os.path.exists(path):
+        error_exit(f'{path} does not exist')
+    try:
+        with open(path, encoding='utf-8') as handle:
+            data = json.load(handle)
+    except json.JSONDecodeError as err:
+        error_exit(f'{path} is not valid JSON: {err}')
+    config = data.get('config', {}).get('rack')
+    if not config:
+        error_exit(f'no rack data found in {path}')
+    inventory = config.pop('inventory', None)
+    for name, rack in config.items():
+        _validate_layout(name, rack, args.force)
+    if inventory:
+        _post_inventory(rest, inventory)
+        info(f'imported inventory ({len(inventory)} devices)')
+    for name, rack in config.items():
+        ok, message = rest.post(f'config/rack/{name}', {'config': {'rack': {name: rack}}})
+        if not ok:
+            error_exit(f'{name}: {message}')
+        info(f'imported rack {name}')
+
+
 # ---------------------------------------------------------------------------
 # argcomplete dynamic completers
 # ---------------------------------------------------------------------------
@@ -698,6 +768,18 @@ def get_parser():
                         version=f'%(prog)s {__version__}')
     parser.add_argument('-v', '--verbose', action='store_true', help='verbose mode')
     parser.add_argument('-R', '--raw', action='store_true', help='raw JSON output')
+
+    bulk = parser.add_argument_group('bulk import/export (JSON)')
+    exchange = bulk.add_mutually_exclusive_group()
+    exchange.add_argument('-e', '--export', nargs='?', const='-', default=False, metavar='FILE',
+                          help='export rack layout as JSON to FILE (STDOUT if omitted)')
+    exchange.add_argument('-i', '--import', dest='import_file', metavar='FILE',
+                          help='import rack layout from a JSON FILE')
+    bulk.add_argument('-r', '--rack', dest='scope_rack', metavar='RACK',
+                      help='limit export to a single rack').completer = rack_completer
+    bulk.add_argument('-f', '--force', action='store_true',
+                      help='overwrite existing export file / allow overlap on import')
+
     subparsers = parser.add_subparsers(dest='command', help='see details with <command> --help')
 
     sub = subparsers.add_parser('list', help='list all racks')
@@ -839,6 +921,12 @@ def main():
     logger = _init_logger(args.verbose)
     logger.info(f"User {getpass.getuser()} ran => {' '.join(sys.argv)}")
 
+    if args.export is not False:
+        cmd_export(args, Rest())
+        return
+    if args.import_file:
+        cmd_import(args, Rest())
+        return
     if not args.command:
         parser.print_help()
         sys.exit(0)
