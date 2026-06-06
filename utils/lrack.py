@@ -834,6 +834,13 @@ def get_parser():
 
     sub = subparsers.add_parser('pool', help='list unconfigured devices (placeable pool)')
 
+    # let -v/-R also be given after the subcommand; SUPPRESS keeps the parent value
+    for command in subparsers.choices.values():
+        command.add_argument('-v', '--verbose', action='store_true',
+                             default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        command.add_argument('-R', '--raw', action='store_true',
+                             default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+
     return parser
 
 
