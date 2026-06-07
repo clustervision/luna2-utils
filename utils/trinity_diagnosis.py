@@ -69,7 +69,7 @@ class Diagnosis():
                 for line in file:
                     line = line.rstrip()
                     if "=" in line:
-                        key, value = line.split("=")
+                        key, value = line.split("=", 1)
                         self.os_info[key.lower()] = value.strip('"')
         else:
             self.exit_diagnosis(f'{platform_name} is not yet supported by Trinity.')
