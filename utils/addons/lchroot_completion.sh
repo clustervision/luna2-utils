@@ -11,8 +11,10 @@
 # If the daemon is unreachable, or curl/jq are missing, osimage completion is
 # simply empty (it never errors or blocks beyond a short timeout).
 #
-# Install: copy to /etc/bash_completion.d/lchroot (or
-#   /usr/share/bash-completion/completions/lchroot), or `source` it from ~/.bashrc.
+# Install: shipped under utils/addons/ as <name>_completion.sh; the TrinityX luna
+# role discovers every utils/addons/*_completion.sh and installs it to
+# /etc/bash_completion.d/<name>.sh (here: lchroot.sh). To install manually, copy
+# this file to /etc/bash_completion.d/lchroot.sh or `source` it from ~/.bashrc.
 # Override the config path with LUNA_INI if it is not at the default location.
 
 _lchroot_images() {

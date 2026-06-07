@@ -108,7 +108,7 @@ setup(
     install_requires = get_requirements(),
     dependency_links = [],
     package_data = {
-        "utils": ["*", "*.tclsh", "*.ini", "*.lchroot"]
+        "utils": ["*", "*.tclsh", "*.ini", "*.lchroot", "addons/*"]
     },
     data_files = [],
     zip_safe = False,
