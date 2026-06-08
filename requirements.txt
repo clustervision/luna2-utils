@@ -7,3 +7,5 @@ termcolor==2.4.0
 openpyxl==3.1.2
 fire==0.5.0
 urllib3==1.26.16
+shtab==1.7.1
+argcomplete==3.6.2
