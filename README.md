@@ -19,3 +19,7 @@ After installing the Luna 2 Utils via pip, all those commands will be available 
 To use lslurm, kindly locate your installation directory. There is a file called slurm.ini<br />
 Slurm.ini file is a configuration of the connection for slurm.<br />
 
+## Contributing
+
+Please read the [contribution guidelines](Guidelines.rst) before submitting changes, including the legal terms that apply to all contributions.
+
