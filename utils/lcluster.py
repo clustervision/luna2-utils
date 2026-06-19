@@ -22,29 +22,34 @@
 lcluster Utility for Trinity Project
 """
 __author__      = "Sumit Sharma"
-__copyright__   = "Copyright 2025, Luna2 Project [UTILITY]"
+__copyright__   = "Copyright 2026, Luna2 Project [UTILITY]"
 __license__     = "GPL"
 __version__     = "2.1"
 __maintainer__  = "Sumit Sharma"
 __email__       = "sumit.sharma@clustervision.com"
-__status__      = "Development"
+__status__      = "Production"
 
 import os
 import sys
-from time import sleep
-from configparser import RawConfigParser
-import subprocess as sp
-from threading import Timer
-from hostlist import collect_hostlist
-import requests
-from requests import Session
-from requests.adapters import HTTPAdapter
-import jwt
-import urllib3
-from urllib3.util import Retry
-from prettytable import PrettyTable
-from termcolor import colored
-import requests_unixsocket
+try:
+    from time import sleep
+    from configparser import RawConfigParser
+    import subprocess as sp
+    from threading import Timer
+    from hostlist import collect_hostlist
+    import requests
+    from requests import Session
+    from requests.adapters import HTTPAdapter
+    import jwt
+    import urllib3
+    from urllib3.util import Retry
+    from prettytable import PrettyTable
+    from termcolor import colored
+    import requests_unixsocket
+
+except KeyboardInterrupt:
+    sys.stderr.write("\nKeyboard Interrupted.\n")
+    sys.exit(1)
 
 TOKEN_FILE = '/trinity/local/luna/utils/config/token.txt'
 INI_FILE = '/trinity/local/luna/utils/config/luna.ini'
@@ -587,8 +592,16 @@ def main():
     """
     This main method will initiate the script for pip installation.
     """
-    return LCluster().health_checkup()
-
+    try:
+        return LCluster().health_checkup()
+    except KeyboardInterrupt:
+        sys.stderr.write("\nKeyboard Interrupted.\n")
+        sys.exit(1)
+    
 
 if __name__ == "__main__":
-    LCluster().health_checkup()
+    try:
+        LCluster().health_checkup()
+    except KeyboardInterrupt:
+        sys.stderr.write("\nKeyboard Interrupted.\n")
+        sys.exit(1)
