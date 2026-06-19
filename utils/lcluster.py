@@ -247,7 +247,7 @@ class LCluster():
         """
         Check IPMI State
         """
-        msg = f'Wait, Fetching IMPI Status of Nodes with {self.daemon} ...\n'
+        msg = f'Wait, Fetching IPMI Status of Nodes with {self.daemon} ...\n'
         response = {}
         sys.stdout.write(colored(msg, 'yellow'))
         node_hostlist = collect_hostlist(nodes)
