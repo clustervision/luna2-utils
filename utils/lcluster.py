@@ -433,7 +433,7 @@ class LCluster():
         """
         This method will fetch a records from the Luna 2 Daemon Database
         """
-        if text is True or text in ['PASS', 'ON']:
+        if text is True or text in ['PASS', 'ON', 'Booted']:
             text = colored(text, 'green')
         elif text in ['OFF', 'WARNING']:
             text = colored(text, 'yellow')
@@ -586,9 +586,32 @@ class LCluster():
 def main():
     """
     This main method will initiate the script for pip installation.
+    Without arguments it prints a single snapshot; --watch refreshes on an interval.
     """
-    return LCluster().health_checkup()
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog='lcluster',
+        description='Health & status of cluster nodes (IPMI power, Luna install state, SLURM).'
+    )
+    parser.add_argument('-w', '--watch', nargs='?', type=int, const=5, default=None,
+                        metavar='SEC',
+                        help='Refresh every SEC seconds (default 5) until interrupted.')
+    args = parser.parse_args()
+
+    if args.watch is None:
+        return LCluster().health_checkup()
+
+    # ponytail: naive full re-render each tick (clear + redraw), no diffing. A watch
+    # loop over a handful of nodes doesn't need a curses TUI.
+    try:
+        while True:
+            sys.stdout.write('\033[2J\033[H')
+            LCluster().health_checkup()
+            sleep(args.watch)
+    except KeyboardInterrupt:
+        pass
+    return True
 
 
 if __name__ == "__main__":
-    LCluster().health_checkup()
+    main()
