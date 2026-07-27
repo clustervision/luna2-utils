@@ -437,7 +437,7 @@ Swept the whole CLI surface for anything lbwrap does that lchroot doesn't:
   genuinely loose fake. Module-reexport gotcha: monkeypatch `os.kill`/`sys.stdin` via
   string targets, not `module.os`/`module.sys` (mypy `attr-defined`).
 - **L13 — Adversarial testing found a real bug: host `TMPDIR` leaks into the
-  sandbox.** The host env (incl. `TMPDIR=/tmp/claude-0`) is inherited by bwrap (same
+  sandbox.** The host env (incl. `TMPDIR=/tmp/<host-tmpdir>`) is inherited by bwrap (same
   as lchroot's chroot), and a host-only `TMPDIR` breaks `dnf`/librepo inside with
   `mkstemp ... No such file or directory`. Fixed: `sandbox.py` pins
   `--setenv TMPDIR /tmp`. Regression-guarded by `test_sandbox` (argv assertion) +
@@ -749,7 +749,7 @@ Swept the whole CLI surface for anything lbwrap does that lchroot doesn't:
   - **(b) Our image lacked `/boot/vmlinuz` → pack would fail — same TMPDIR leak, one layer up.**
     The kernel `%posttrans` (`kernel-install`: copies vmlinuz→/boot + builds initramfs) silently
     failed during bootstrap because foreign-bootstrap's dnf didn't sanitise `TMPDIR` (leaked host
-    `/tmp/claude-0`). Fixed: pin `TMPDIR=/tmp` on the bootstrap dnf + a `/boot/vmlinuz-*` verify.
+    `/tmp/<host-tmpdir>`). Fixed: pin `TMPDIR=/tmp` on the bootstrap dnf + a `/boot/vmlinuz-*` verify.
     Re-verification that the fixed bootstrap populates `/boot` is **pending** (needs a re-run).
   - **(c)** luna dracut hook `99-luna-parse-cmdline.sh` emits a benign `[: =: unary operator
     expected` when no luna kernel cmdline is passed (cosmetic for a kernel+initrd boot test).
@@ -932,7 +932,7 @@ Swept the whole CLI surface for anything lbwrap does that lchroot doesn't:
     **Update (later 2026-06-01):** Alex's key added → repo `core.sshCommand` set, `ssh -T` greets
     `@alex`, branch pushed (backup live; box has none). The **`agent` kit was moved OUT of the repo to
     `/root/agents/`** (it's a generic methodology kit, not lchroot-specific; the three `<dev-tree>`
-    symlinks AGENTS.md/CLAUDE.md/copilot-instructions.md now point at `/root/agents/AGENTS.md`). Docs
+    symlinks the assistant instruction files now point at `/root/agents/AGENTS.md`). Docs
     committed to the branch **verbatim** (findings/regression/skill/adversarial) — **`JOURNAL.md` kept
     as-is by user decision** (active dev, the running log is useful). **`.gitlab-ci.yml`** gained a
     unit/lint/type `test` stage (scoped to MRs + the lchroot-bwrap branch; integration NOT run in CI).
@@ -1068,7 +1068,7 @@ Swept the whole CLI surface for anything lbwrap does that lchroot doesn't:
 > instructions + ADRs moved INTO this repo: **`docs/lchroot/AGENTS.md`** (project entrypoint,
 > points at the shared kit) and **`docs/lchroot/decisions/`** (ADRs 0002–0009; the generic
 > ADR-0001 template stays in engineering-standards). The `<dev-tree>`
-> AGENTS.md/CLAUDE.md/copilot symlinks now point at `docs/lchroot/AGENTS.md`. `/root/agents`
+> the assistant instruction-file symlinks now point at the docs tree. `/root/agents`
 > is **retired/removed**. Python = TrinityX `/trinity/local/python` 3.10.
 >
 > **Repos / branches (all pushed as `@alex` except the daemon):**
@@ -1244,7 +1244,7 @@ live, parity vs lchroot established (+ found/fixed lchroot's no-tty bug), luna-s
 shell completion, **lock administration** (`--status`/`--kill`/interactive `--force`,
 D15/D16, ADRs 0002–0003), and **deployed reversibly** as `/usr/local/sbin/lbwrap` +
 `/etc/bash_completion.d/lbwrap`. **Repo scaffolding now wired** (this session): canonical
-`AGENTS.md`/`CLAUDE.md`/`.github/copilot-instructions.md` symlinks → `src/agent/AGENTS.md`,
+the assistant instruction-file symlinks → `src/agent/AGENTS.md`,
 `.gitignore`, root `.pre-commit-config.yaml`, and `.github/workflows/ci.yml` with action
 SHAs pinned (checkout v4.3.1, setup-uv v5.4.2, resolved 2026-05-30) — but **`git init`
 itself is not yet run**. Everything below is productionization / nice-to-have — none of it
@@ -1266,7 +1266,7 @@ blocks daily use. Pick up here.
 
 **Remaining work (priority order):**
 - [ ] `git init` the repo (still NOT a git repo) + first commit. The surrounding wiring is
-  **already done** (2026-05-30): symlinks (`AGENTS.md`/`CLAUDE.md`/`.github/copilot-instructions.md`
+  **already done** (2026-05-30): symlinks (the assistant instruction files
   → `src/agent/AGENTS.md`), `.gitignore`, root `.pre-commit-config.yaml`, and
   `.github/workflows/ci.yml` (SHAs pinned). Remaining: run `git init`, then `pre-commit
   install` (needs the git repo) and verify `pre-commit run --all-files` is green, then commit.
@@ -1325,5 +1325,5 @@ suite (never by diffing against this source). The adversarial `RESULTS-*.md` log
 here. **CONTAMINATION RULE (one-directional):** that directory must never learn where
 this source lives — do NOT copy `src/lbwrap` into it, add `<dev-tree>` pointers, or
 reference it from there. Recording its existence *here* (in the original) is fine; the
-rule only runs the other way. The user validates it via a separate clean `claude`
+rule only runs the other way. The user validates it via a separate clean assistant
 session pointed at that dir ("Option A").

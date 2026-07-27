@@ -706,7 +706,7 @@ under a separate personal account. **The box has NO backups → commit + push of
 >   (a) an **MR-triggered `mkdocs build --strict`** job (turn the strict build into an actual
 >   gate, matching the kit's DOC-BUILD-001 claim that "the strict build is the review gate");
 >   and optionally (b) a **per-branch preview** (GitLab Pages / review app) giving reviewers a
->   real URL. Claude can draft both on request.
+>   real URL. Both can be drafted on request.
 
 **Goal:** rewrite/extend the **deployed** TrinityX docs (GitLab `clustervision/trinityx-docs`,
 MkDocs → docs.clustervision.com) to cover (1) the **new lchroot** and (2) **ARM/foreign-arch
