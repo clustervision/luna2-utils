@@ -1,0 +1,131 @@
+#!/bin/bash
+
+# This code is part of the TrinityX software suite
+# Copyright (C) 2026  ClusterVision Solutions b.v.
+# Author: Alex Ninaber
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>
+
+
+
+set -e
+NEED_UMOUNT_DEV=1
+NEED_UMOUNT_SYS=1
+NEED_UMOUNT_PROC=1
+
+function clean {
+    [ -z $CHROOT_PATH ] && return 0
+    [ $NEED_UMOUNT_DEV -eq 1 ] && umount -f $CHROOT_PATH/dev
+    [ $NEED_UMOUNT_PROC -eq 1 ] && umount -f $CHROOT_PATH/proc
+    [ $NEED_UMOUNT_SYS -eq 1 ] && umount -f $CHROOT_PATH/sys
+    rm -f $CHROOT_PATH/tmp/lchroot.lock
+}
+
+function mount_d {
+    mount -t devtmpfs devtmpfs  $CHROOT_PATH/dev  2>/dev/null || NEED_UMOUNT_DEV=0
+    mount -t sysfs    sysfs     $CHROOT_PATH/sys  2>/dev/null || NEED_UMOUNT_SYS=0
+    mount -t proc     proc      $CHROOT_PATH/proc 2>/dev/null || NEED_UMOUNT_PROC=0
+}
+
+export LUNA_INI='/trinity/local/luna/utils/config/luna.ini'
+
+# --------------------------------------------
+
+if [ -f $LUNA_INI ]; then
+    while IFS='=' read -ra line; do
+        if [ ! "$(echo $line | grep -E '^(#|;)')" ] && [ "$line" ]; then
+            if [ "$(echo $line | grep '^\[')" ]; then
+                section=$(echo $line | grep -oE "[A-Z]+")
+            else
+                key=$(echo ${line[0]})
+                value=$(echo ${line[1]})
+                declare -x "${section}_${key}"="$value"
+            fi
+        fi
+    done < "$LUNA_INI"
+else
+    echo "No config file: $LUNA_INI"
+fi
+
+API_VERIFY_CERTIFICATE=$(echo $API_VERIFY_CERTIFICATE | tr 'A-Z' 'a-z')
+if [ "$API_VERIFY_CERTIFICATE" == "false" ] || [ "$API_VERIFY_CERTIFICATE" == "no" ]; then
+	INSECURE="--insecure"
+fi
+TOKEN=""
+function get_token {
+    if [ -z $TOKEN ]; then
+        json='{"username":"'${API_USERNAME}'", "password":"'${API_PASSWORD}'"}'
+        response=$(curl $INSECURE -X POST -H "Content-Type: application/json" -d "$json" -s "${API_PROTOCOL}://${API_ENDPOINT}/token")
+        token=$(echo $response | awk '{ print $2 }' | grep -oE '"(\S+)"')
+        TOKEN=$(echo "${token:1:-1}")
+    fi
+    echo $TOKEN
+}
+
+OSIMAGE=$1
+if [ "x${OSIMAGE}" = "x" ]; then
+    echo "osimage need to be specified."
+    echo "Type 'luna osimage list' to get the list."
+    exit 7
+fi
+token=$(get_token)
+
+getHA=$(curl $INSECURE -H "x-access-tokens: $token" -s "${API_PROTOCOL}://${API_ENDPOINT}/ha/state" 2> /dev/null)
+HA_STATE=$(echo "$getHA" | jq --raw-output ".ha.enabled" 2> /dev/null)
+HA_MASTER=$(echo "$getHA" | jq --raw-output ".ha.master" 2> /dev/null)
+
+if [ "$HA_STATE" == "true" ] && [ "$HA_MASTER" != "true" ]; then
+    echo "!! Big Warning: changes made on an image on a Non-master controller will be lost after sync." 
+fi
+
+getRet=$(curl $INSECURE -H "x-access-tokens: $token" -s "${API_PROTOCOL}://${API_ENDPOINT}/config/osimage/$OSIMAGE")
+FAKE_KERN=$(echo "$getRet" | jq --raw-output ".config.osimage.\"$OSIMAGE\".kernelversion")
+CHROOT_PATH=$(echo "$getRet" | jq --raw-output ".config.osimage.\"$OSIMAGE\".path")
+
+if [ ! "$FAKE_KERN" ]; then
+    echo "!! Warning: Could not determine the kernel version of the image." 
+    echo "!! This is not fatal but might result in LD_PRELOAD lines being printed while being in the lchroot"
+fi
+if [ ! "$CHROOT_PATH" ]; then
+    echo "!! Error: Could not determine the path of the image. I cannot continue."
+    exit 7
+fi
+if [ "$CHROOT_PATH" == "null" ]; then
+    echo "!! Error: Could not determine the path of the image. Does this image exist?"
+    exit 7
+fi
+
+echo "IMAGE PATH: $CHROOT_PATH"
+if [ -f $CHROOT_PATH/tmp/lchroot.lock ]; then
+    TMP=$(cat $CHROOT_PATH/tmp/lchroot.lock)
+    echo "File $CHROOT_PATH/tmp/lchroot.lock exists."
+    echo "Currently ${TMP} is using lchroot. Exiting."
+    exit 9
+fi
+
+CUR_TTY=$(tty)
+CUR_PID=$$
+echo "PID ${CUR_PID} on ${CUR_TTY}" > $CHROOT_PATH/tmp/lchroot.lock
+
+trap clean EXIT
+mount_d
+shift
+
+FAKE_KERN=$FAKE_KERN LD_PRELOAD=libluna-fakeuname.so PS1="chroot [\u@$OSIMAGE \W]\$ " chroot $CHROOT_PATH "$@"
+
+if [ "$HA_STATE" == "true" ] && [ "$HA_MASTER" == "true" ]; then
+    # after we leave the chroot we make sure to have the other controllers pull the image
+    curl $INSECURE -H "x-access-tokens: $token" -s "${API_PROTOCOL}://${API_ENDPOINT}/ha/syncimage/$OSIMAGE" &> /dev/null
+fi
+

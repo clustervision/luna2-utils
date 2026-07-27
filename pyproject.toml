@@ -1,0 +1,61 @@
+# Tooling config for the `lchroot` package (ruff / mypy / pytest / coverage / bandit).
+# NOTE: build + distribution metadata live in setup.py (luna2-utils convention).
+# This file is intentionally [tool.*]-only — it has NO [build-system] or [project]
+# table, so it coexists with setup.py and does not change how the package is built.
+# Scope the gates to the lchroot package + its tests, e.g.:
+#   ruff check utils/lchroot tests && ruff format --check utils/lchroot tests
+#   mypy            # uses files= below
+#   pytest          # uses testpaths/pythonpath below
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+src = [".", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "C4", "RET", "ARG", "ANN", "S",
+          "FBT", "PT", "PTH", "DTZ", "PL", "BLE", "D", "RUF"]
+ignore = ["E501", "D203", "D213"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["utils"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "ANN", "D", "PLR2004", "ARG", "FBT"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unreachable = true
+enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code", "possibly-undefined"]
+pretty = true
+files = ["utils/lchroot", "utils/qemu_static", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["urllib3.*"]   # ships no type stubs; scoped per-module, never global
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "--cov=utils.lchroot --cov=utils.qemu_static --cov-branch --cov-report=term-missing --cov-fail-under=85 --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["integration: real-system tests; gated on LCHROOT_ITEST=1 + controller identity"]
+filterwarnings = ["error::DeprecationWarning"]
+
+[tool.coverage.run]
+branch = true
+source = ["utils/lchroot", "utils/qemu_static"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.bandit]
+exclude_dirs = ["tests"]
