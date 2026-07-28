@@ -8,7 +8,7 @@ This file is the entry point for provisioning
 __author__      = 'Antoine Schonewille'
 __copyright__   = 'Copyright 2025, Luna2 Project'
 __license__     = 'GPL'
-__version__     = '2.1'
+__version__     = '2.2'
 __maintainer__  = 'Dev-team'
 __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
