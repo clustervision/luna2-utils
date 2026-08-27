@@ -18,21 +18,49 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>
 
 """
-lconsole v2.5 — stream console output from a TrinityX compute node.
+lconsole v4.0 — interactive SOL console for a TrinityX compute node.
 
-  lconsole node001              SOL first, auto-handoff to netconsole (default)
-  lconsole node001 --netconsole Netconsole UDP only
-  lconsole node001 --sol-only   Interactive SOL only (IPMI or Redfish)
+  lconsole node001              Serial-over-LAN via the BMC (IPMI or Redfish)
 
-SOL uses a real PTY (os.openpty) so ipmitool/ssh get a genuine TTY on stdin.
-Keystrokes are forwarded byte-for-byte; SIGWINCH propagates terminal resize.
-Type <escape>.. at the start of a line to exit an interactive session.
+Design: ONE event loop, ONE escape parser, ZERO rendering.
+Remote bytes are written to the terminal untouched — no pinned status bar, no
+scroll region, no terminal emulation. BIOS/PXE screens use absolute cursor
+addressing over the full screen, so any reserved row fights the remote for
+real estate; a plain banner at connect time interferes with nothing.
+Keystrokes are forwarded byte-for-byte to the SOL session.
+
+SOL is the only transport (netconsole support was removed in v4.0): the BMC
+covers the whole lifetime of the node — BIOS, PXE, bootloader, kernel (with
+console= on the osimage kernel options) and the booted OS. A dead or frozen
+session is restarted automatically, forever, paced by --sol-fail-grace plus
+a random jitter so a fleet-wide event doesn't turn many concurrent sessions
+into a synchronized retry storm against the same BMCs. Retry chatter goes
+quiet after the first couple of attempts (everything is still in the file
+log); the session announces itself once when it comes back.
+
+Exiting a session:
+  <escape>..   (default escape char '!', at the start of a line)
+  Ctrl-C       while SOL is up: first Ctrl-C is forwarded to the node,
+               a second Ctrl-C within 1 s exits lconsole.
+               While SOL is down (reconnecting): exits immediately.
+
+--debug prints a periodic heartbeat (SOL byte counts, process-alive) — use it
+before speculating about a "blank screen" report. It also logs (file only,
+not drawn in-stream) every raw stdin read and the result of escape-filtering
+it — proves whether keystrokes reach this process at all, which a
+nested-SSH-hop or terminal problem could break before lconsole ever sees them.
+
+ipmitool's own local "SOL Session operational" banner is stripped from the
+IPMI backend's first read and never counted as real SOL activity — proven live
+(22 Jul 2026) to otherwise fool the staleness/reconnect bookkeeping into
+thinking a session had recovered when only the local banner had arrived and
+the node itself had gone silent for good this cycle.
 """
 
 __author__      = 'Dev-team'
 __copyright__   = 'Copyright 2025, Luna2 Project [UTILITY]'
 __license__     = 'GPL'
-__version__     = '2.5'
+__version__     = '4.0'
 __maintainer__  = 'Dev-team'
 __email__       = 'support@clustervision.com'
 __status__      = 'Development'
@@ -40,22 +68,20 @@ __status__      = 'Development'
 import argparse
 import fcntl
 import getpass
+import logging
 import os
-import pty
+import random
 import select
 import signal
-import socket
 import struct
 import subprocess
 import sys
-import threading
 import time
 import tty
 import termios
 import shutil
 import requests
 
-from utils.utils.log import Log
 from utils.utils.ini import Ini
 from utils.utils.token import Token
 
@@ -63,31 +89,63 @@ from utils.utils.token import Token
 # Constants
 # ---------------------------------------------------------------------------
 
-NETCONSOLE_PORT        = 6666
 LUNA_CONFIG_PATH       = '/trinity/local/luna/utils/config/luna.ini'
 LOG_FILE               = '/var/log/luna/lconsole.log'
 
-DEFAULT_SOL_TIMEOUT    = 180
-DEFAULT_HANDOFF_GRACE  = 5
 DEFAULT_SOL_CIPHER     = 3
-DEFAULT_READY_MARKER   = 'TRINITYX_LCONSOLE_NETCONSOLE_READY'
-DEFAULT_SOL_FAIL_GRACE = 10
-DEFAULT_SOL_ESCAPE     = '!'   # escape prefix for SOL exit; use --sol-escape to override
+DEFAULT_SOL_FAIL_GRACE = 10   # seconds between reconnect attempts while SOL is down
+DEFAULT_SOL_ESCAPE     = '!'   # escape prefix for exit; use --sol-escape to override
 IPMI_PREP_TIMEOUT      = 5
-SSH_PROBE_TIMEOUT      = 1
-logger = Log.init_log(log_file=LOG_FILE, log_level='info')
+SOL_STALE_AFTER_INPUT  = 5.0  # seconds of silence after a keystroke before we warn
+DEBUG_HEARTBEAT_SECS   = 5.0  # --debug: how often to print the byte-count heartbeat
+# Reconnects are unbounded on purpose: SOL is the only transport, and a live
+# capture (22 Jul 2026) showed a real BMC needing ~10 reconnect cycles to get
+# through a rocky chipset-init/POST phase before the node's own SOL output
+# stabilized — any cap risks giving up mid-recovery on exactly that case. The
+# operator ends a session; the tool doesn't.
+SOL_RECONNECT_JITTER_MAX = 5.0  # random 0..N-second delay before each reconnect
+# After a reconnect the payload is often still dead (the BMC drops SOL over
+# and over around kexec/PXE — reproduced live, 16 Aug 2026: each reconnect
+# "succeeded" but delivered nothing until the operator typed again). So every
+# reconnect arms a probe: if not a single byte arrives within
+# SOL_EXPECT_OUTPUT_SECS, reconnect again on our own — but only up to
+# MAX_SILENT_RECONNECTS consecutive silent cycles, because an idle login
+# prompt after a genuine recovery is legitimately silent forever and must not
+# be reconnected out from under the operator indefinitely. Any received byte
+# resets the count and ends the probing.
+SOL_EXPECT_OUTPUT_SECS   = 10.0
+MAX_SILENT_RECONNECTS    = 12   # covers the observed ~10-cycle rocky transition
+# attempt, so a fleet-wide event (mass reboot, common BMC hiccup) doesn't turn
+# hundreds/thousands of concurrent lconsole sessions into a synchronized retry
+# storm against the same BMCs/network at the same instant.
+CTRL_C                 = b'\x03'
+CTRL_C_EXIT_WINDOW     = 1.0   # second Ctrl-C within this many seconds exits
+
+
+def _init_logger():
+    """File logger; falls back to a null logger when the log path is unwritable
+    (non-root users must still be able to run lconsole)."""
+    log = logging.getLogger('lconsole')
+    log.setLevel(logging.INFO)
+    try:
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        handler = logging.FileHandler(LOG_FILE)
+        handler.setFormatter(logging.Formatter(
+            '[%(levelname)s]:[%(asctime)s]:[%(threadName)s]:'
+            '[%(filename)s:%(funcName)s@%(lineno)d] - %(message)s'))
+        log.addHandler(handler)
+    except OSError:
+        log.addHandler(logging.NullHandler())
+    return log
+
+
+logger = _init_logger()
 requests.packages.urllib3.disable_warnings()
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Small helpers
 # ---------------------------------------------------------------------------
-
-class ConsoleEvent:
-    def __init__(self, source, line):
-        self.source = source
-        self.line   = line
-
 
 def _info(msg):
     print(f'\033[36m[lconsole]\033[0m {msg}', flush=True)
@@ -97,18 +155,14 @@ def _warn(msg):
     print(f'\033[33m[lconsole] warning:\033[0m {msg}', flush=True)
 
 
-def _banner(msg):
-    """Orange banner printed once at connection time."""
-    print(f'\033[38;5;214m[lconsole]\033[0m {msg}', flush=True)
-
-
-def node_is_booted(ip, timeout=SSH_PROBE_TIMEOUT):
-    """TCP probe port 22; returns True if node OS is already up."""
+def terminal_size():
+    """(rows, cols) of the operator's terminal, or (24, 80)."""
     try:
-        with socket.create_connection((ip, 22), timeout=timeout):
-            return True
-    except (ConnectionRefusedError, OSError):
-        return False
+        buf = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b'\x00' * 8)
+        rows, cols = struct.unpack('HHHH', buf)[:2]
+        return rows or 24, cols or 80
+    except (OSError, ValueError):
+        return 24, 80
 
 
 # ---------------------------------------------------------------------------
@@ -179,542 +233,214 @@ def resolve_node_details(nodename, conf):
 
 
 # ---------------------------------------------------------------------------
-# Netconsole UDP listener
+# Escape / exit detection — the ONE state machine for every mode
 # ---------------------------------------------------------------------------
 
-class NetconsoleListener:
-    def __init__(self, node_ip, port=NETCONSOLE_PORT):
-        self.node_ip = node_ip
-        self.port    = port
-        self.sock    = None
-
-    def start(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(('0.0.0.0', self.port))
-        self.sock.setblocking(False)
-
-    def fileno(self):
-        return self.sock.fileno()
-
-    def read_events(self):
-        events = []
-        while True:
-            try:
-                data, addr = self.sock.recvfrom(65535)
-            except BlockingIOError:
-                break
-            if addr[0] != self.node_ip:
-                continue
-            line = data.decode('utf-8', errors='replace').rstrip('\n')
-            events.append(ConsoleEvent('NET', line))
-        return events
-
-    def stop(self):
-        if self.sock:
-            try:
-                self.sock.close()
-            except Exception:
-                pass
-            self.sock = None
-
-
-
-class TerminalUI:
+class EscapeFilter:
     """
-    Tiny viewport terminal: row 1 is lconsole, rows 2..N are a virtual screen.
+    Scans operator keystrokes for the exit sequence.
 
-    Remote output is parsed into an in-memory buffer first.  Only render()
-    writes to the real terminal, so the remote console cannot overwrite the bar.
+    Exit on <escape>'..' typed at the start of a line, or on Ctrl-C:
+    immediately when there is nothing to forward input to (SOL down,
+    mid-reconnect), or on a second Ctrl-C within CTRL_C_EXIT_WINDOW seconds
+    when the SOL session is up (the first one is forwarded to the node).
+
+    feed() returns (bytes_to_forward, exit_requested). After a forwarded
+    Ctrl-C, .notice holds a one-time hint for the operator.
     """
 
-    def __init__(self, title=''):
-        self.title = title
-        self.rows = 24
-        self.cols = 80
-        self.vrows = 23
-        self.vcols = 80
-        self.active = False
-        self.enabled = sys.stdout.isatty() and os.environ.get('TERM', 'dumb') != 'dumb'
-        self._esc_state = 'normal'
-        self._csi_buf = bytearray()
-        self._refresh_size()
-        self._reset_buffer()
+    def __init__(self, escape=b'!'):
+        self.escape     = escape
+        self.line_start = True
+        self.armed      = 0      # 0 idle, 1 <esc> seen, 2 <esc>. seen
+        self.last_intr  = 0.0
+        self.notice     = None
+        self.hinted     = False
 
-    def _refresh_size(self):
-        try:
-            buf = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b'\x00' * 8)
-            rows, cols = struct.unpack('HHHH', buf)[:2]
-            self.rows, self.cols = rows or 24, cols or 80
-        except Exception:
-            self.rows, self.cols = 24, 80
-        self.vrows = max(1, self.rows - 1)
-        self.vcols = max(1, self.cols)
+    def _plain(self, out, byte):
+        out += byte
+        self.line_start = byte in (b'\r', b'\n')
 
-    def refresh(self):
-        if not self.enabled:
-            return
-        self._refresh_size()
-        self._resize_buffer()
-        self.render()
-
-    def child_size(self):
-        self._refresh_size()
-        return self.vrows, self.vcols
-
-    def setup(self, preserve_scrollback=True):
-        if not self.enabled:
-            self.active = False
-            return
-        self._refresh_size()
-        self._reset_buffer()
-        self.active = True
-        if preserve_scrollback:
-            sys.stdout.write('\033[?25l\033[?7l\r\n')
-        else:
-            sys.stdout.write('\033[?25l\033[?7l\033[2J\033[H')
-        self.render()
-
-    def teardown(self):
-        if not self.enabled:
-            return
-        sys.stdout.write('\033[0m\033[?7h\033[?25h\033[2J\033[H')
-        sys.stdout.flush()
-        self.active = False
-
-    def redraw(self, title=None):
-        if title is not None:
-            self.title = title
-        if self.enabled:
-            self._refresh_size()
-            self._resize_buffer()
-            self.render()
-
-    def write_line(self, msg, source='lconsole'):
-        """Write a local lconsole/status line into the viewport."""
-        text = f'[{source}] {msg}\r\n'
-        self.write_remote(text.encode('utf-8', errors='replace'))
-
-    def write_remote(self, data):
-        if not data:
-            return
-        if not self.enabled:
-            os.write(sys.stdout.fileno(), data)
-            return
-        self.feed(data)
-        self.render()
-
-    def feed(self, data):
+    def feed(self, data, interactive=True):
+        out = bytearray()
         for b in data:
-            self._feed_byte(b)
-
-    def render(self):
-        if not self.enabled:
-            return
-        out = []
-        out.append('\033[H')
-        out.append(self._title_line())
-        for r in range(self.vrows):
-            out.append(f'\033[{r + 2};1H')
-            out.append(''.join(self.buf[r])[:self.vcols])
-        out.append(f'\033[{self.cur_r + 2};{self.cur_c + 1}H')
-        out.append('\033[?25h')
-        sys.stdout.write(''.join(out))
-        sys.stdout.flush()
-
-    def _title_line(self):
-        bar = self.title.ljust(self.cols)[:self.cols]
-        return f'\033[48;5;214m\033[30m{bar}\033[0m'
-
-    def _reset_buffer(self):
-        self.buf = [[' '] * self.vcols for _ in range(self.vrows)]
-        self.cur_r = 0
-        self.cur_c = 0
-        self._esc_state = 'normal'
-        self._csi_buf = bytearray()
-
-    def _resize_buffer(self):
-        if len(getattr(self, 'buf', [])) == self.vrows and len(self.buf[0]) == self.vcols:
-            return
-        old = getattr(self, 'buf', [])
-        new = [[' '] * self.vcols for _ in range(self.vrows)]
-        copy_rows = min(len(old), self.vrows)
-        old_start = max(0, len(old) - copy_rows)
-        new_start = self.vrows - copy_rows
-        for i in range(copy_rows):
-            old_row = old[old_start + i]
-            copy_cols = min(len(old_row), self.vcols)
-            new[new_start + i][:copy_cols] = old_row[:copy_cols]
-        self.buf = new
-        self.cur_r = min(max(new_start, getattr(self, 'cur_r', 0) - old_start + new_start), self.vrows - 1)
-        self.cur_c = min(getattr(self, 'cur_c', 0), self.vcols - 1)
-
-    def _feed_byte(self, b):
-        if self._esc_state == 'normal':
-            if b == 0x1b:
-                self._esc_state = 'esc'
+            byte = bytes([b])
+            if byte == CTRL_C:
+                now = time.monotonic()
+                if not interactive or (now - self.last_intr) <= CTRL_C_EXIT_WINDOW:
+                    return bytes(out), True
+                self.last_intr = now
+                if not self.hinted:
+                    self.notice = ('Ctrl-C sent to the node — press Ctrl-C again '
+                                   'quickly to exit lconsole')
+                    self.hinted = True
+                self._plain(out, byte)
+            elif self.armed:
+                if byte == b'.':
+                    self.armed += 1
+                    if self.armed == 3:
+                        return bytes(out), True
+                else:
+                    # abort: flush what was swallowed, then handle this byte
+                    out += self.escape + b'.' * (self.armed - 1)
+                    self.armed = 0
+                    self._plain(out, byte)
+            elif self.line_start and byte == self.escape:
+                self.armed = 1
             else:
-                self._control_or_print(b)
-            return
+                self._plain(out, byte)
+        return bytes(out), False
 
-        if self._esc_state == 'esc':
-            if b == ord('['):
-                self._esc_state = 'csi'
-                self._csi_buf.clear()
-            elif b == ord('c'):
-                self._reset_buffer()
-            else:
-                self._esc_state = 'normal'
-            return
-
-        if self._esc_state == 'csi':
-            self._csi_buf.append(b)
-            if 0x40 <= b <= 0x7e:
-                final = chr(b)
-                params = self._csi_buf[:-1].decode('ascii', errors='ignore')
-                self._handle_csi(params, final)
-                self._esc_state = 'normal'
-
-    def _control_or_print(self, b):
-        if b == 0x07:      # BEL
-            return
-        if b == 0x08:      # BS
-            self.cur_c = max(0, self.cur_c - 1)
-            return
-        if b == 0x09:      # TAB
-            self.cur_c = min(self.vcols - 1, ((self.cur_c // 8) + 1) * 8)
-            return
-        if b == 0x0d:      # CR
-            self.cur_c = 0
-            return
-        if b == 0x0a:      # LF
-            self._newline()
-            return
-        if b < 0x20 or b == 0x7f:
-            return
-        self._put_char(chr(b))
-
-    def _put_char(self, ch):
-        if 0 <= self.cur_r < self.vrows and 0 <= self.cur_c < self.vcols:
-            self.buf[self.cur_r][self.cur_c] = ch
-        self.cur_c += 1
-        if self.cur_c >= self.vcols:
-            self.cur_c = 0
-            self._newline()
-
-    def _newline(self):
-        self.cur_r += 1
-        if self.cur_r >= self.vrows:
-            self.buf.pop(0)
-            self.buf.append([' '] * self.vcols)
-            self.cur_r = self.vrows - 1
-        self.cur_c = min(self.cur_c, self.vcols - 1)
-
-    def _handle_csi(self, params, final):
-        parts = self._parse_params(params)
-        if final in ('H', 'f'):
-            row = (parts[0] if len(parts) >= 1 and parts[0] else 1) - 1
-            col = (parts[1] if len(parts) >= 2 and parts[1] else 1) - 1
-            self.cur_r = max(0, min(self.vrows - 1, row))
-            self.cur_c = max(0, min(self.vcols - 1, col))
-        elif final == 'A':
-            self.cur_r = max(0, self.cur_r - (parts[0] or 1))
-        elif final == 'B':
-            self.cur_r = min(self.vrows - 1, self.cur_r + (parts[0] or 1))
-        elif final == 'C':
-            self.cur_c = min(self.vcols - 1, self.cur_c + (parts[0] or 1))
-        elif final == 'D':
-            self.cur_c = max(0, self.cur_c - (parts[0] or 1))
-        elif final == 'G':
-            self.cur_c = max(0, min(self.vcols - 1, (parts[0] or 1) - 1))
-        elif final == 'K':
-            self._erase_line(parts[0] if parts else 0)
-        elif final == 'J':
-            self._erase_screen(parts[0] if parts else 0)
-        elif final == 'm':
-            pass  # SGR colors ignored in the first stable implementation
-        elif final == 'r':
-            pass  # remote scroll regions ignored; viewport owns display
-
-    def _parse_params(self, params):
-        if not params or params == '?':
-            return []
-        params = params.lstrip('?')
-        out = []
-        for p in params.split(';'):
-            try:
-                out.append(int(p) if p else 0)
-            except ValueError:
-                out.append(0)
-        return out
-
-    def _erase_line(self, mode):
-        if mode == 1:
-            for c in range(0, self.cur_c + 1):
-                self.buf[self.cur_r][c] = ' '
-        elif mode == 2:
-            self.buf[self.cur_r] = [' '] * self.vcols
-        else:
-            for c in range(self.cur_c, self.vcols):
-                self.buf[self.cur_r][c] = ' '
-
-    def _erase_screen(self, mode):
-        if mode == 1:
-            for r in range(0, self.cur_r + 1):
-                end = self.cur_c + 1 if r == self.cur_r else self.vcols
-                for c in range(0, end):
-                    self.buf[r][c] = ' '
-        elif mode in (2, 3):
-            self._reset_buffer()
-        else:
-            for r in range(self.cur_r, self.vrows):
-                start = self.cur_c if r == self.cur_r else 0
-                for c in range(start, self.vcols):
-                    self.buf[r][c] = ' '
 
 # ---------------------------------------------------------------------------
-# SOL backend abstract base
+# SOL backends — shared PTY/subprocess plumbing, per-backend command building
 # ---------------------------------------------------------------------------
 
 class SolBackend:
     """
-    Abstract base for all SOL backends (IPMI, Redfish SSH).
-
-    Subclasses implement: start, read_events, is_alive, exit_summary, fileno, stop.
-    The PTY helpers (_open_pty, _close_slave, _close_master) and the interactive
-    loop (_pty_interactive / run_interactive) are shared by all backends.
+    Base class owning the PTY and child process. Subclasses implement
+    command() -> (argv, env) and optionally prepare() for pre-flight work.
     """
 
-    def start(self):          raise NotImplementedError
-    def read_events(self):    raise NotImplementedError
-    def is_alive(self):       raise NotImplementedError
-    def exit_summary(self):   raise NotImplementedError
-    def fileno(self):         raise NotImplementedError
-    def stop(self):           raise NotImplementedError
+    label  = 'SOL'
+    # A backend whose client prints its own local banner on activation (ipmitool
+    # does; a plain ssh session doesn't) sets this so read() can strip it — see
+    # the note on read() below for why this matters more than it looks like it
+    # should.
+    BANNER = None
+    # (noisy, calm) pairs: client-printed error lines that read far more
+    # alarming than the event they describe — a BMC tearing down SOL while the
+    # chassis resets is routine, and the reconnect logic (not the operator) is
+    # what deals with it. read() swaps the wording; a chunk boundary splitting
+    # the line would let the original through, which is accepted — worst case
+    # is the scary original showing once.
+    NOISE  = ()
 
-    @staticmethod
-    def _get_terminal_size():
-        """Return (rows, cols) of the operator's terminal, or (24, 80)."""
-        try:
-            buf = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b'\x00' * 8)
-            rows, cols = struct.unpack('HHHH', buf)[:2]
-            return rows or 24, cols or 80
-        except Exception:
-            return 24, 80
+    def __init__(self, nodename, bmc_ip, bmcsetup):
+        self.nodename   = nodename
+        self.bmc_ip     = bmc_ip
+        self.bmcsetup   = bmcsetup
+        self.proc       = None
+        self._master_fd = None
+        self._banner_pending = self.BANNER is not None
 
-    def _set_pty_size(self, slave_fd):
-        """Propagate viewport size to the PTY slave (status row excluded)."""
-        try:
-            if getattr(self, 'ui', None) is not None:
-                rows, cols = self.ui.child_size()
-            else:
-                rows, cols = SolBackend._get_terminal_size()
-            buf = struct.pack('HHHH', rows, cols, 0, 0)
-            fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, buf)
-        except Exception:
-            pass
+    def prepare(self):
+        pass
 
-    def run_interactive(self, escape_char=DEFAULT_SOL_ESCAPE):
-        """Block until the operator exits with <escape>+'..' or child exit."""
-        esc = escape_char.encode() if isinstance(escape_char, str) else escape_char
-        self._pty_interactive(esc)
+    def command(self):
+        raise NotImplementedError
 
-    def _pty_interactive(self, esc_prefix=b'~'):
-        """Bidirectional PTY passthrough. Exits on <esc_prefix>+'..' or child exit."""
-        proc = getattr(self, 'proc', None)
-        if proc is None:
-            raise RuntimeError('SOL process not started — call start() first')
-
-        master_fd = getattr(self, '_master_fd', None)
-        slave_fd  = getattr(self, '_slave_fd',  None)
-        if master_fd is None:
-            raise RuntimeError('No PTY master fd — backend did not call _open_pty()')
-
-        fd_in  = sys.stdin.fileno()
-        old_tc = termios.tcgetattr(fd_in) if os.isatty(fd_in) else None
-
-        # Push current terminal size into the slave
-        if slave_fd is not None:
-            self._set_pty_size(slave_fd)
-
-        # Install SIGWINCH handler to forward resize events
-        _slave_ref = [slave_fd]
-        def _on_winch(signum, frame):
-            if _slave_ref[0] is not None:
-                self._set_pty_size(_slave_ref[0])
-            if getattr(self, 'ui', None) is not None:
-                self.ui.redraw()
-            else:
-                self._draw_bar(f' [lconsole] {nodename}  |  BMC: {bmc_ip}  |  SOL  |  {esc_prefix.decode(errors="replace")}.. to exit ')
-                self._pin_top_row()
-
-        old_winch = signal.signal(signal.SIGWINCH, _on_winch)
-
-        input_at_line_start = True
-        escape_seen        = 0
-        user_exited        = False
-        exit_requested     = False
-        exit_reason        = None
-
-        nodename = getattr(self, 'nodename', '?')
-        bmc_ip   = getattr(self, 'bmc_ip', '?')
-
-        try:
-            if old_tc is not None:
-                tty.setraw(fd_in)
-
-            while proc.poll() is None:
-                rlist = [fd_in, master_fd]
-                try:
-                    ready, _, _ = select.select(rlist, [], [], 0.2)
-                except (ValueError, OSError):
-                    break
-
-                # ---- operator → node ----
-                if fd_in in ready:
-                    try:
-                        chunk = os.read(fd_in, 256)
-                    except OSError:
-                        break
-                    if not chunk:
-                        break
-
-                    filtered = bytearray()
-                    for b in chunk:
-                        byte = bytes([b])
-                        if escape_seen:
-                            if byte == b'.':
-                                escape_seen += 1
-                                if escape_seen == 3:
-                                    exit_requested = True
-                                    exit_reason = 'escape sequence'
-                                    break
-                            else:
-                                filtered += esc_prefix + (b'.' * max(0, escape_seen - 1)) + byte
-                                escape_seen = 0
-                                input_at_line_start = False
-                        elif input_at_line_start and byte == esc_prefix:
-                            escape_seen = 1
-                        else:
-                            filtered += byte
-                            input_at_line_start = (byte in (b'\r', b'\n'))
-
-                    if filtered:
-                        try:
-                            os.write(master_fd, bytes(filtered))
-                        except OSError:
-                            break
-                    if exit_requested:
-                        user_exited = True
-                        break
-
-                # ---- node → operator ----
-                if master_fd in ready:
-                    try:
-                        out = os.read(master_fd, 4096)
-                    except OSError:
-                        break
-                    if not out:
-                        break
-                    if getattr(self, 'ui', None) is not None:
-                        self.ui.write_remote(out)
-                    else:
-                        os.write(sys.stdout.fileno(), out)
-
-        except KeyboardInterrupt:
-            pass
-        finally:
-            _slave_ref[0] = None
-            signal.signal(signal.SIGWINCH, old_winch)
-            if getattr(self, 'ui', None) is not None:
-                self.ui.teardown()
-            else:
-                self._unpin_top_row()
-            if old_tc is not None:
-                try:
-                    termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
-                    old_tc = None
-                except Exception:
-                    pass
-            if exit_requested and exit_reason:
-                print(f'\r\n[lconsole] {exit_reason} — disconnecting.', flush=True)
-            self.stop()
-
-    def _open_pty(self):
-        """Open a PTY pair; call before Popen(). Child gets slave, parent keeps master."""
+    def start(self, winsize=(24, 80)):
+        self.prepare()
+        cmd, env = self.command()
         master_fd, slave_fd = os.openpty()
-        self._set_pty_size(slave_fd)
-        if getattr(self, 'ui', None) is not None:
-            self.ui.refresh()
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ,
+                    struct.pack('HHHH', winsize[0], winsize[1], 0, 0))
         flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
         fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
         self._master_fd = master_fd
-        self._slave_fd  = slave_fd
-        return master_fd, slave_fd
+        logger.info('%s SOL start for %s via %s', self.label, self.nodename, self.bmc_ip)
+        self.proc = subprocess.Popen(
+            cmd, env=env,
+            stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+            close_fds=True, start_new_session=True,
+        )
+        os.close(slave_fd)
 
-    def _close_slave(self):
-        if getattr(self, '_slave_fd', None) is not None:
+    def fileno(self):
+        return self._master_fd
+
+    def is_alive(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def exit_summary(self):
+        rc = self.proc.poll() if self.proc else None
+        return None if rc is None else f'{self.label} SOL exited (code {rc})'
+
+    def read(self):
+        chunks = []
+        while self._master_fd is not None:
             try:
-                os.close(self._slave_fd)
+                chunk = os.read(self._master_fd, 4096)
+            except (BlockingIOError, OSError):
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+        out = b''.join(chunks)
+        if self._banner_pending and out:
+            # ipmitool prints its own local "[SOL Session operational...]" line
+            # the instant the client-side session opens — before the BMC has
+            # delivered a single real byte from the node. Counted as genuine
+            # activity, it silently defeats the staleness/reconnect logic: a
+            # BMC that keeps dropping the actual SOL payload during a rocky
+            # POST can reconnect over and over, each time producing just this
+            # banner, each time looking "alive" to every caller — proven live
+            # (22 Jul 2026): 5+ reconnect cycles where the only bytes seen were
+            # this banner, repeated, while the node produced nothing.
+            self._banner_pending = False
+            if out.startswith(self.BANNER):
+                out = out[len(self.BANNER):]
+        for noisy, calm in self.NOISE:
+            if noisy in out:
+                out = out.replace(noisy, calm)
+        return out
+
+    def write(self, data):
+        """Returns True if the bytes were handed to the PTY. False means the far
+        side (ipmitool) has stopped draining its stdin — the operator's keystrokes
+        would otherwise vanish silently, which is worse than a visible warning."""
+        if self._master_fd is None or not data:
+            return True
+        try:
+            os.write(self._master_fd, data)
+            return True
+        except OSError:
+            return False
+
+    def set_winsize(self, rows, cols):
+        if self._master_fd is not None:
+            try:
+                fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ,
+                            struct.pack('HHHH', rows, cols, 0, 0))
             except OSError:
                 pass
-            self._slave_fd = None
 
-    def _close_master(self):
-        if getattr(self, '_master_fd', None) is not None:
+    def stop(self):
+        if self.proc is not None:
+            # graceful deactivate first (~. is the ipmitool/ssh escape)
+            self.write(b'\r~.')
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=5)
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+            self.proc = None
+        if self._master_fd is not None:
             try:
                 os.close(self._master_fd)
             except OSError:
                 pass
             self._master_fd = None
 
-    # ── terminal UI (clear, status bar, scroll regions) ──
-
-    @staticmethod
-    def _clear_screen():
-        sys.stdout.write('\033[2J\033[H')
-        sys.stdout.flush()
-
-    # ── fixed status bar ──
-
-    @staticmethod
-    def _draw_bar(msg):
-        """Orange bar with black text pinned at the very top of the terminal."""
-        rows, cols = SolBackend._get_terminal_size()
-        bar = msg.ljust(cols)[:cols]
-        sys.stdout.write(f'\0337\033[1;1H\033[48;5;214m\033[30m{bar}\033[0m\0338')
-        sys.stdout.flush()
-
-    @staticmethod
-    def _pin_top_row():
-        """Reserve the top row for the status bar; all scrolling happens in rows 2..N."""
-        rows, _ = SolBackend._get_terminal_size()
-        if rows > 1:
-            sys.stdout.write(f'\033[2;{rows}r\033[{rows};1H')
-            sys.stdout.flush()
-
-    @staticmethod
-    def _unpin_top_row():
-        """Restore full-screen scroll region and clear the status bar line."""
-        sys.stdout.write('\033[r')
-        sys.stdout.write('\033[1;1H\033[2K')
-        sys.stdout.flush()
-
-# ---------------------------------------------------------------------------
-# IPMI SOL backend
-# ---------------------------------------------------------------------------
 
 class IpmiSolBackend(SolBackend):
-    """IPMI v2/lanplus backend via ipmitool. Prep (enable, deactivate) runs in background."""
+    """IPMI v2/lanplus via ipmitool."""
+
+    label  = 'IPMI'
+    BANNER = b'[SOL Session operational.  Use ~? for help]\r\n'
+    NOISE  = (
+        (b'Error: No response to keepalive - Terminating session',
+         b'[sol] BMC stopped answering \xe2\x80\x94 it is likely resetting with the chassis (normal during a reboot)'),
+        (b'Error: No response de-activating SOL payload', b''),
+    )
 
     def __init__(self, nodename, bmc_ip, bmcsetup, cipher=DEFAULT_SOL_CIPHER):
-        self.nodename   = nodename
-        self.bmc_ip     = bmc_ip
-        self.bmcsetup   = bmcsetup
-        self.cipher     = cipher
-        self.proc       = None
-        self.ui         = None
-        self._prep_done = threading.Event()
+        super().__init__(nodename, bmc_ip, bmcsetup)
+        self.cipher = cipher
 
     def _env(self):
         env = os.environ.copy()
@@ -726,91 +452,21 @@ class IpmiSolBackend(SolBackend):
                 '-C', str(self.cipher), '-H', self.bmc_ip,
                 '-U', self.bmcsetup['username']]
 
-    def _run_prep_cmd(self, extra):
-        try:
-            subprocess.run(self._base_cmd() + extra, env=self._env(),
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=IPMI_PREP_TIMEOUT)
-        except Exception as exc:
-            logger.debug('IPMI prep %s skipped: %s', extra, exc)
-
-    def _prep_background(self):
-        self._run_prep_cmd(['sol', 'set', 'enabled', 'true'])
-        self._run_prep_cmd(['sol', 'set', 'volatile-bit-rate', '115.2'])
-        self._run_prep_cmd(['sol', 'deactivate'])
-        self._prep_done.set()
-
-    def start(self):
-        t = threading.Thread(target=self._prep_background, daemon=True, name='ipmi-prep')
-        t.start()
-        self._prep_done.wait(timeout=IPMI_PREP_TIMEOUT * 3 + 2)
-
-        master_fd, slave_fd = self._open_pty()
-
-        cmd = self._base_cmd() + ['sol', 'activate']
-        logger.info('IPMI SOL activate: %s via %s', self.nodename, self.bmc_ip)
-        self.proc = subprocess.Popen(
-            cmd, env=self._env(),
-            stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
-            close_fds=True,
-        )
-        self._close_slave()
-
-    def fileno(self):
-        return getattr(self, '_master_fd', None)
-
-    def is_alive(self):
-        return self.proc is not None and self.proc.poll() is None
-
-    def exit_summary(self):
-        if self.proc is None:
-            return None
-        rc = self.proc.poll()
-        if rc is None:
-            return None
-        return f'IPMI SOL exited (code {rc})'
-
-    def read_events(self):
-        events  = []
-        mfd = getattr(self, '_master_fd', None)
-        if mfd is None or not self.is_alive():
-            return events
-        while True:
+    def prepare(self):
+        """Enable SOL and kick any stale session before activating."""
+        for extra in (['sol', 'set', 'enabled', 'true'],
+                      ['sol', 'set', 'volatile-bit-rate', '115.2'],
+                      ['sol', 'deactivate']):
             try:
-                chunk = os.read(mfd, 4096)
-            except BlockingIOError:
-                break
-            except OSError:
-                break
-            if not chunk:
-                break
-            events.append(ConsoleEvent('SOL', chunk))
-        return events
+                subprocess.run(self._base_cmd() + extra, env=self._env(),
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=IPMI_PREP_TIMEOUT)
+            except Exception as exc:
+                logger.debug('IPMI prep %s skipped: %s', extra, exc)
 
-    def stop(self):
-        if self.proc is not None:
-            try:
-                mfd = getattr(self, '_master_fd', None)
-                if mfd is not None:
-                    os.write(mfd, b'\r~.')
-            except Exception:
-                pass
-            try:
-                self.proc.terminate()
-                self.proc.wait(timeout=5)
-            except Exception:
-                try:
-                    self.proc.kill()
-                except Exception:
-                    pass
-            self.proc = None
-        self._close_master()
+    def command(self):
+        return self._base_cmd() + ['sol', 'activate'], self._env()
 
-
-
-# ---------------------------------------------------------------------------
-# Redfish SOL backend
-# ---------------------------------------------------------------------------
 
 class RedfishSolBackend(SolBackend):
     """
@@ -822,7 +478,8 @@ class RedfishSolBackend(SolBackend):
     Set bmcsetup.redfish_port in Luna to skip discovery and use a static port.
     """
 
-    # Candidate system paths tried in order
+    label = 'REDFISH'
+
     SYSTEM_PATHS = [
         '/redfish/v1/Systems/1',
         '/redfish/v1/Systems/system',
@@ -830,20 +487,12 @@ class RedfishSolBackend(SolBackend):
         '/redfish/v1/Systems/Self',
     ]
 
-    def __init__(self, nodename, bmc_ip, bmcsetup,
-                 system_path=None):
-        self.nodename    = nodename
-        self.bmc_ip      = bmc_ip
-        self.bmcsetup    = bmcsetup
+    def __init__(self, nodename, bmc_ip, bmcsetup, system_path=None):
+        super().__init__(nodename, bmc_ip, bmcsetup)
         self._system_path_override = system_path
-        self.proc        = None
-        self.ui          = None
-        self._ssh_port   = None   
-
-    # --- Redfish discovery ---
+        self._ssh_port = None
 
     def _redfish_get(self, path):
-        """GET a Redfish path; returns parsed JSON or raises."""
         url  = f'https://{self.bmc_ip}{path}'
         resp = requests.get(
             url,
@@ -855,7 +504,6 @@ class RedfishSolBackend(SolBackend):
         return resp.json()
 
     def _discover_system_path(self):
-        """Return the first system path that responds with HTTP 200."""
         if self._system_path_override:
             return self._system_path_override
         for path in self.SYSTEM_PATHS:
@@ -872,7 +520,6 @@ class RedfishSolBackend(SolBackend):
             f'Tried: {self.SYSTEM_PATHS}')
 
     def _discover_ssh_port(self):
-        """Return SSH serial port: static bmcsetup.redfish_port or discovered via Redfish."""
         static = self.bmcsetup.get('redfish_port')
         if static:
             logger.info('Using static Redfish SSH port %s for %s', static, self.nodename)
@@ -880,8 +527,7 @@ class RedfishSolBackend(SolBackend):
 
         system_path = self._discover_system_path()
         data        = self._redfish_get(system_path)
-        serial      = data.get('SerialConsole', {})
-        ssh_info    = serial.get('SSH', {})
+        ssh_info    = data.get('SerialConsole', {}).get('SSH', {})
 
         if not ssh_info:
             raise RuntimeError(
@@ -905,17 +551,22 @@ class RedfishSolBackend(SolBackend):
         logger.info('Redfish discovered SSH serial port %s on %s', port, self.bmc_ip)
         return int(port)
 
-    # --- SSH subprocess helpers ---
+    def prepare(self):
+        _info(f'Querying Redfish on {self.bmc_ip} for serial console port...')
+        self._ssh_port = self._discover_ssh_port()
+        _info(f'Redfish: serial console SSH port = {self._ssh_port}')
+        if not shutil.which('sshpass'):
+            _warn(
+                'sshpass not found — SSH password prompt will appear in the terminal. '
+                'Install sshpass for fully automated login: '
+                'dnf install sshpass  or  apt install sshpass'
+            )
 
-    @staticmethod
-    def _sshpass_available():
-        return shutil.which('sshpass') is not None
-
-    def _build_ssh_cmd(self, port):
-        base = [
+    def command(self):
+        cmd = [
             'ssh',
             '-tt',                          # force PTY allocation
-            '-p', str(port),
+            '-p', str(self._ssh_port),
             '-l', self.bmcsetup['username'],
             '-o', 'StrictHostKeyChecking=no',
             '-o', 'UserKnownHostsFile=/dev/null',
@@ -926,152 +577,88 @@ class RedfishSolBackend(SolBackend):
             '-o', 'PreferredAuthentications=password,keyboard-interactive',
             self.bmc_ip,
         ]
-        if self._sshpass_available():
-            return ['sshpass', '-p', self.bmcsetup['password']] + base
-        return base
-
-    # --- SolBackend interface ---
-
-    def start(self):
-        """Discover SSH port via Redfish, then launch the SSH subprocess."""
-        _info(f'Querying Redfish on {self.bmc_ip} for serial console port...')
-        self._ssh_port = self._discover_ssh_port()
-        _info(f'Redfish: serial console SSH port = {self._ssh_port}')
-
-        if not self._sshpass_available():
-            _warn(
-                'sshpass not found — SSH password prompt will appear in the terminal. '
-                'Install sshpass for fully automated login: '
-                'dnf install sshpass  or  apt install sshpass'
-            )
-
-        cmd = self._build_ssh_cmd(self._ssh_port)
+        if shutil.which('sshpass'):
+            cmd = ['sshpass', '-p', self.bmcsetup['password']] + cmd
         env = os.environ.copy()
         env['DISPLAY'] = ''   # suppress graphical password prompts
-
-        master_fd, slave_fd = self._open_pty()
-
-        logger.info('Launching Redfish SSH SOL for %s: port %s', self.nodename, self._ssh_port)
-        self.proc = subprocess.Popen(
-            cmd,
-            env=env,
-            stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
-            close_fds=True,
-        )
-        self._close_slave()
-
-    def fileno(self):
-        return getattr(self, '_master_fd', None)
-
-    def is_alive(self):
-        return self.proc is not None and self.proc.poll() is None
-
-    def exit_summary(self):
-        if self.proc is None:
-            return None
-        rc = self.proc.poll()
-        if rc is None:
-            return None
-        return f'Redfish SSH SOL exited (code {rc})'
-
-    def read_events(self):
-        events = []
-        mfd = getattr(self, '_master_fd', None)
-        if mfd is None or not self.is_alive():
-            return events
-        while True:
-            try:
-                chunk = os.read(mfd, 4096)
-            except BlockingIOError:
-                break
-            except OSError:
-                break
-            if not chunk:
-                break
-            events.append(ConsoleEvent('SOL', chunk))
-        return events
-
-    def stop(self):
-        if self.proc is not None:
-            try:
-                mfd = getattr(self, '_master_fd', None)
-                if mfd is not None:
-                    os.write(mfd, b'\r~.')
-            except Exception:
-                pass
-            try:
-                self.proc.terminate()
-                self.proc.wait(timeout=5)
-            except Exception:
-                try:
-                    self.proc.kill()
-                except Exception:
-                    pass
-            self.proc = None
-        self._close_master()
+        return cmd, env
 
 
 # ---------------------------------------------------------------------------
-# Main console controller
+# Main console controller — one loop for every mode
 # ---------------------------------------------------------------------------
 
 class LConsole:
-    """Drives netconsole listener and/or SOL backend (hybrid / netconsole / sol)."""
+    """
+    Drives the SOL backend: stdin is filtered through EscapeFilter and
+    forwarded to the SOL PTY (so the operator can interact with BIOS/grub
+    during boot), remote bytes stream to the terminal verbatim, and a dead or
+    frozen session is restarted on a paced cadence without blocking the loop.
+    """
 
-    def __init__(self, nodename, details, mode='hybrid',
-                 sol_backend_name='ipmi', sol_timeout=DEFAULT_SOL_TIMEOUT,
-                 handoff_grace=DEFAULT_HANDOFF_GRACE, ready_marker=DEFAULT_READY_MARKER,
-                 cipher=DEFAULT_SOL_CIPHER, sol_fail_grace=DEFAULT_SOL_FAIL_GRACE,
-                 sol_escape=DEFAULT_SOL_ESCAPE):
+    def __init__(self, nodename, details,
+                 sol_backend_name='ipmi', cipher=DEFAULT_SOL_CIPHER,
+                 sol_fail_grace=DEFAULT_SOL_FAIL_GRACE,
+                 sol_escape=DEFAULT_SOL_ESCAPE, debug=False):
         self.nodename         = nodename
         self.details          = details
-        self.mode             = mode
         self.sol_backend_name = sol_backend_name
-        self.sol_timeout      = sol_timeout
-        self.handoff_grace    = handoff_grace
-        self.ready_marker     = ready_marker
         self.cipher           = cipher
         self.sol_fail_grace   = sol_fail_grace
         self.sol_escape       = sol_escape
-        self.net               = None
-        self.sol               = None
-        self.net_seen          = False
-        self.marker_seen       = False
-        self.net_first_seen_at = None
-        self.start_time        = None
-        self.sol_failed_at     = None
-        self.sol_fail_reported = False
-        self.ui                = None
+        self.debug            = debug
 
-    def _bar_label(self):
-        """Build the status-bar label for the current mode."""
-        boot_ip = self.details['boot_ip'] or '?'
-        bmc_ip  = self.details['bmc_ip'] or 'N/A'
-        escape = f'{self.sol_escape}.. to exit'
-        if self.mode == 'netconsole':
-            body = f'{self.nodename}  |  {boot_ip}  |  netconsole UDP :{NETCONSOLE_PORT}  |  {escape}'
-        elif self.mode == 'sol':
-            body = f'{self.nodename}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} SOL  |  {escape}'
+        self.filter = EscapeFilter(sol_escape.encode())
+        self.sol    = None
+
+        self.sol_gone_at = None   # when a dead SOL was first noticed
+        self.exit_reason = None
+        self._winch      = False
+        # SOL "frozen but still alive" detection: ipmitool can keep running
+        # while the BMC has silently dropped the payload (common across reboots).
+        # An idle console legitimately produces zero output, so staleness is
+        # judged against OPERATOR INPUT getting no reply — not against silence
+        # alone, which would false-positive on any quiet login prompt.
+        self._sol_input_sent_at     = None
+        self._sol_output_since_input = True
+        self._sol_stale_warned      = False
+        self._sol_reconnect_count   = 0
+        # post-reconnect liveness probe (see SOL_EXPECT_OUTPUT_SECS)
+        self._sol_probe_deadline    = None
+        self._silent_reconnects     = 0
+
+        # --debug: periodic heartbeat proving (or disproving) that bytes are
+        # actually arriving, so "screen is blank" can be told apart from
+        # "bytes arrive but nothing visible renders" without guessing.
+        self._sol_rx_total     = 0
+        self._sol_rx_interval  = 0
+        self._debug_last       = None
+
+    # ── presentation ──
+
+    def _session_line(self):
+        bmc_ip = self.details['bmc_ip'] or 'N/A'
+        escape = f'{self.sol_escape}.. or Ctrl-C to exit'
+        return f'{self.nodename}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} SOL  |  {escape}'
+
+    def _banner(self):
+        """One orange line at connect time; scrolls away, fights nothing."""
+        line = f' [lconsole] {self._session_line()} '
+        if sys.stdout.isatty():
+            self._write(f'\r\033[48;5;214m\033[30m{line}\033[0m\r\n'.encode())
         else:
-            body = f'{self.nodename}  |  {boot_ip}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} + netconsole :{NETCONSOLE_PORT}  |  {escape}'
-        return f' [lconsole] {body} '
+            self._write(f'{line}\r\n'.encode())
 
-    def _setup_ui(self):
-        """Create a protected viewport below the status bar."""
-        self.ui = TerminalUI(self._bar_label())
-        self.ui.setup()
+    def _write(self, data):
+        """Remote bytes → terminal, verbatim."""
+        os.write(sys.stdout.fileno(), data)
 
-    def _redraw_bar(self):
-        """Redraw the status bar (after a mode change)."""
-        if self.ui is not None:
-            self.ui.redraw(self._bar_label())
+    def _message(self, msg):
+        """A local status line inside the stream (col 0, own line)."""
+        self._write(f'\r\n\033[36m[lconsole]\033[0m {msg}\r\n'.encode())
+        logger.info('%s: %s', self.nodename, msg)
 
-    def _log(self, msg, source='lconsole'):
-        """Write local lconsole messages inside the viewport when UI is active."""
-        if self.ui is not None and self.ui.enabled:
-            self.ui.write_line(msg, source=source)
-        else:
-            _info(msg) if source == 'lconsole' else print(f'[{source}] {msg}', flush=True)
+    # ── construction ──
 
     def _build_sol(self):
         bmc_ip   = self.details['bmc_ip']
@@ -1087,205 +674,233 @@ class LConsole:
         raise RuntimeError(f'Unknown SOL backend: {self.sol_backend_name}')
 
     def start(self):
-        self.start_time = time.time()
-        boot_ip = self.details['boot_ip']
-        bmc_ip  = self.details['bmc_ip'] or 'N/A'
-        if self.mode == 'netconsole':
-            self._start_netconsole_only(boot_ip)
-        elif self.mode == 'sol':
-            self._start_sol_only(bmc_ip)
-        else:
-            self._start_hybrid(boot_ip, bmc_ip)
-
-    def _start_netconsole_only(self, boot_ip):
-        self._setup_ui()
-        self.net = NetconsoleListener(boot_ip)
-        self.net.start()
-        self._log('Waiting for kernel printk messages...')
-
-    def _start_sol_only(self, bmc_ip):
-        self._setup_ui()
+        _info(f'Starting {self.sol_backend_name.upper()} SOL...')
         self.sol = self._build_sol()
-        self.sol.ui = self.ui
-        self.sol.start()
-        self.sol.run_interactive(escape_char=self.sol_escape)
+        self.sol.start(winsize=terminal_size())
 
-    def _start_hybrid(self, boot_ip, bmc_ip):
-        self._setup_ui()
-        self.net = NetconsoleListener(boot_ip)
-        self.net.start()
-        self._log('SSH probe...')
-        if node_is_booted(boot_ip):
-            self._log('Node already up — skipping SOL, netconsole-only.')
-            self.mode = 'netconsole'
-            self._redraw_bar()
-            return
-        self._log('No SSH response — node is booting.')
+    # ── event handling ──
 
-        if not self.details['bmc_ip'] or not self.details['bmcsetup']:
-            self._log('warning: No BMC IP or bmcsetup — netconsole-only fallback.')
-            self.mode = 'netconsole'
-            self._redraw_bar()
-            return
-
-        self._log(f'Starting {self.sol_backend_name.upper()} SOL...')
+    def _restart_sol(self, why, quiet_after=2):
+        """Tear down and restart the SOL backend (jittered). quiet_after=N
+        prints the first N attempts, announces once that retrying continues
+        quietly, then logs the rest file-only — a slow POST can take dozens
+        of paced attempts and narrating each one buries the console."""
+        self._sol_reconnect_count += 1
+        n = self._sol_reconnect_count
+        jitter = random.uniform(0, SOL_RECONNECT_JITTER_MAX)
+        line = f'{why} — reconnecting SOL in {jitter:.1f}s (attempt {n})...'
+        loud = quiet_after is None or n <= quiet_after
+        if loud:
+            self._message(line)
+        else:
+            if n == quiet_after + 1:
+                self._message('SOL is still down — retrying quietly until it comes back.')
+            logger.info('%s: %s', self.nodename, line)
+        time.sleep(jitter)
+        if self.sol is not None:
+            self.sol.stop()
         try:
             self.sol = self._build_sol()
-            self.sol.ui = self.ui
-            self.sol.start()
-        except NotImplementedError as exc:
-            self._log(f'warning: {exc}')
-            self._log('Falling back to netconsole-only.')
-            self.sol = None
-            self.mode = 'netconsole'
-            self._redraw_bar()
-            return
+            self.sol.start(winsize=terminal_size())
         except Exception as exc:
-            self._log(f'warning: SOL start failed: {exc}')
+            if loud:
+                self._message(f'warning: reconnect failed: {exc}')
+            else:
+                logger.info('%s: reconnect failed: %s', self.nodename, exc)
             self.sol = None
-            self.mode = 'netconsole'
-            self._redraw_bar()
             return
+        self._sol_input_sent_at      = None
+        self._sol_output_since_input = True
+        self._sol_stale_warned       = False
+        # arm the liveness probe: a reconnect that delivers nothing within
+        # this window is treated as another dead payload, not a success
+        self._sol_probe_deadline = time.monotonic() + SOL_EXPECT_OUTPUT_SECS
+        self._message('SOL reconnected.')
 
-        self._log(f"SOL active — handoff on '{self.ready_marker}' or net +{self.handoff_grace}s.")
-
-    def _print_event(self, event):
-        if self.ui is not None and self.ui.enabled:
-            if event.source == 'SOL':
-                self.ui.write_remote(event.line)
-            else:
-                self.ui.write_line(event.line, source=event.source)
-        else:
-            if event.source == 'SOL':
-                os.write(sys.stdout.fileno(), event.line)
-            else:
-                print(f'[{event.source}] {event.line}', flush=True)
-
-    def _handle_net_event(self, event):
-        self.net_seen = True
-        if self.net_first_seen_at is None:
-            self.net_first_seen_at = time.time()
-            logger.info('First netconsole pkt from %s', self.nodename)
-        if self.ready_marker in event.line:
-            self.marker_seen = True
-            logger.info('Ready marker seen for %s', self.nodename)
-        self._print_event(event)
-
-    def _maybe_handoff(self):
-        if self.mode != 'hybrid':
+    def _maybe_recover_sol(self):
+        """A dead SOL session gets restarted on the sol_fail_grace cadence,
+        forever: BMCs routinely kill the SOL payload once while the chassis
+        resets (keepalive timeout, especially on shared-NIC BMCs) and come
+        back seconds later. With SOL the only transport, giving up would mean
+        a dark screen for the rest of the boot — the operator ends a session,
+        the tool doesn't."""
+        if self.sol is not None and self.sol.is_alive():
+            self.sol_gone_at = None
+            # post-reconnect probe: "reconnected" but not one byte arrived —
+            # the payload is likely still dead (BMCs drop SOL repeatedly
+            # around kexec/PXE); reconnect again without waiting for the
+            # operator to type. Bounded: an idle prompt after a genuine
+            # recovery is legitimately silent, so after MAX_SILENT_RECONNECTS
+            # consecutive silent cycles stop probing and say so once.
+            if (self._sol_probe_deadline is not None
+                    and time.monotonic() >= self._sol_probe_deadline):
+                self._sol_probe_deadline = None
+                if self._silent_reconnects < MAX_SILENT_RECONNECTS:
+                    self._silent_reconnects += 1
+                    self._restart_sol('reconnected but no output yet')
+                else:
+                    self._message('console is still silent after '
+                                  f'{MAX_SILENT_RECONNECTS} reconnects — probably just '
+                                  'an idle console; type something to re-check.')
             return
-        now = time.time()
-
-        if self.sol is not None and not self.sol.is_alive():
-            if not self.sol_fail_reported:
+        now = time.monotonic()
+        if self.sol_gone_at is None:
+            self.sol_gone_at = now
+            if self.sol is not None:
                 summary = self.sol.exit_summary() or 'SOL exited unexpectedly'
-                _info(f'SOL: {summary}')
-                logger.warning('SOL for %s exited: %s', self.nodename, summary)
-                self.sol_fail_reported = True
-                self.sol_failed_at     = now
-            if self.net_seen:
-                _info('netconsole active — continuing netconsole-only.\n')
-                self.sol  = None
-                self.mode = 'netconsole'
-                return
-            if self.sol_failed_at and (now - self.sol_failed_at) >= self.sol_fail_grace:
-                _info(f'No netconsole after {self.sol_fail_grace}s since SOL exit; '
-                      'waiting netconsole-only.\n')
-                self.sol  = None
-                self.mode = 'netconsole'
-                return
+                self._message(f'{summary} — restarting in {self.sol_fail_grace}s.')
             return
-
-        if self.sol is None:
+        if now - self.sol_gone_at < self.sol_fail_grace:
             return
+        self.sol_gone_at = None
+        self._restart_sol('SOL is down')
 
-        if self.marker_seen:
-            _info(f'Ready marker seen — closing SOL after {self.handoff_grace}s grace.\n')
-            time.sleep(self.handoff_grace)
-            self.sol.stop()
-            self.sol  = None
-            self.mode = 'netconsole'
+    def _debug_heartbeat(self, sol_fd):
+        """--debug: prove whether bytes are actually arriving. Tells apart a
+        truly silent link (0 bytes, process dead or BMC dropped it) from bytes
+        arriving but not visibly rendering (a real count, screen still blank)."""
+        now = time.monotonic()
+        if self._debug_last is None:
+            self._debug_last = now
             return
-
-        if self.net_seen and self.net_first_seen_at and \
-                (now - self.net_first_seen_at) >= self.handoff_grace:
-            _info('Netconsole confirmed — closing SOL.\n')
-            self.sol.stop()
-            self.sol  = None
-            self.mode = 'netconsole'
+        if now - self._debug_last < DEBUG_HEARTBEAT_SECS:
             return
+        sol_alive = self.sol.is_alive() if self.sol is not None else None
+        self._message(
+            f'debug: sol_fd={sol_fd} sol_alive={sol_alive} '
+            f'reconnects={self._sol_reconnect_count} '
+            f'sol_rx last{DEBUG_HEARTBEAT_SECS:.0f}s/total={self._sol_rx_interval}/{self._sol_rx_total}B')
+        self._sol_rx_interval = 0
+        self._debug_last = now
 
-        if not self.net_seen and (now - self.start_time) >= self.sol_timeout:
-            _warn(f'No netconsole after {self.sol_timeout}s — '
-                  'switching SOL to interactive mode.\n')
-            # Hand control to the full interactive PTY loop; this blocks
-            # until the operator exits, then we fall through to loop() cleanup.
-            self.sol.run_interactive(escape_char=self.sol_escape)
-            self.sol  = None
-            self.mode = 'sol'
+    def _on_winch(self, signum, frame):
+        self._winch = True
 
-    def loop(self):
-        if self.mode == 'sol':
-            return
-        exit_seen = 0
-        fd_in = sys.stdin.fileno()
-        old_tc = termios.tcgetattr(fd_in) if os.isatty(fd_in) else None
+    def _handle_resize(self):
+        if self.sol is not None:
+            self.sol.set_winsize(*terminal_size())
+
+    # ── the loop ──
+
+    def _on_term(self, signum, frame):
+        # convert SIGTERM/SIGHUP into an exception so the finally block
+        # restores the operator's terminal (echo, raw mode) before dying
+        self.exit_reason = f'signal {signum}'
+        raise SystemExit(128 + signum)
+
+    def run(self):
+        fd_in      = sys.stdin.fileno()
+        stdin_tty  = os.isatty(fd_in)
+        old_tc     = termios.tcgetattr(fd_in) if stdin_tty else None
+        stdin_open = True
+        old_winch  = signal.signal(signal.SIGWINCH, self._on_winch)
+        old_term   = signal.signal(signal.SIGTERM, self._on_term)
+        old_hup    = signal.signal(signal.SIGHUP, self._on_term)
+        self._banner()
         try:
             if old_tc is not None:
-                tty.setcbreak(fd_in)
+                tty.setraw(fd_in)
+
             while True:
-                fds    = [fd_in]
-                sol_fd = None
-                if self.net is not None:
-                    fds.append(self.net.fileno())
-                if self.sol is not None:
-                    sol_fd = self.sol.fileno()
-                    if sol_fd is not None and self.sol.is_alive():
-                        fds.append(sol_fd)
+                if self._winch:
+                    self._winch = False
+                    self._handle_resize()
+
+                sol_fd = self.sol.fileno() if (self.sol and self.sol.is_alive()) else None
+                if sol_fd is None and self.sol is not None:
+                    out = self.sol.read()   # drain what the child wrote before exiting
+                    if out:
+                        self._write(out)
+
+                fds = []
+                if stdin_open:
+                    fds.append(fd_in)
+                if sol_fd is not None:
+                    fds.append(sol_fd)
                 if not fds:
-                    time.sleep(0.5)
-                    self._maybe_handoff()
-                    continue
-                ready, _, _ = select.select(fds, [], [], 1.0)
-                if fd_in in ready:
-                    data = os.read(fd_in, 32)
-                    for b in data:
-                        byte = bytes([b])
-                        if exit_seen:
-                            if byte == b'.':
-                                exit_seen += 1
-                                if exit_seen == 3:
-                                    if self.ui is not None and self.ui.enabled:
-                                        self.ui.write_line('escape sequence — exiting.', source='lconsole')
-                                    return
+                    self.exit_reason = 'nothing left to watch'
+                    return
+
+                ready, _, _ = select.select(fds, [], [], 0.2)
+
+                # operator → escape filter → node
+                if stdin_open and fd_in in ready:
+                    try:
+                        data = os.read(fd_in, 256)
+                    except OSError:
+                        data = b''
+                    if not data:
+                        stdin_open = False   # EOF (piped stdin) — keep streaming
+                    else:
+                        if self.debug:
+                            # Proves bytes reach this process at all — the one thing a
+                            # nested SSH-hop / terminal-multiplexer problem could break
+                            # before lconsole ever sees a keystroke. Log-only (not drawn
+                            # in-stream) so it doesn't clutter what you're watching.
+                            logger.info('%s: stdin raw bytes: %r', self.nodename, data)
+                        fwd, want_exit = self.filter.feed(data, interactive=sol_fd is not None)
+                        if self.debug:
+                            logger.info('%s: after escape-filter: fwd=%r want_exit=%s '
+                                        'sol_fd=%s', self.nodename, fwd, want_exit, sol_fd)
+                        if self.filter.notice:
+                            self._message(self.filter.notice)
+                            self.filter.notice = None
+                        if sol_fd is not None and fwd:
+                            if not self.sol.write(fwd):
+                                self._message('warning: could not send keystrokes to the '
+                                              'node — the SOL link appears stuck.')
                             else:
-                                exit_seen = 0
-                        elif byte == self.sol_escape.encode():
-                            exit_seen = 1
-                if self.net is not None and self.net.fileno() in ready:
-                    for ev in self.net.read_events():
-                        self._handle_net_event(ev)
-                if sol_fd is not None and sol_fd in ready and self.sol is not None:
-                    for ev in self.sol.read_events():
-                        self._print_event(ev)
-                self._maybe_handoff()
+                                self._sol_input_sent_at      = time.monotonic()
+                                self._sol_output_since_input = False
+                                self._sol_stale_warned       = False
+                        if want_exit:
+                            self.exit_reason = 'exit requested'
+                            return
+
+                # node → operator
+                if sol_fd is not None and sol_fd in ready:
+                    out = self.sol.read()
+                    if out:
+                        self._write(out)
+                        self._sol_output_since_input = True
+                        self._sol_reconnect_count     = 0  # proven healthy again
+                        self._sol_probe_deadline      = None
+                        self._silent_reconnects       = 0
+                        if self.debug:
+                            self._sol_rx_total    += len(out)
+                            self._sol_rx_interval += len(out)
+
+                if (sol_fd is not None and self._sol_input_sent_at is not None
+                        and not self._sol_output_since_input and not self._sol_stale_warned
+                        and time.monotonic() - self._sol_input_sent_at > SOL_STALE_AFTER_INPUT):
+                    self._sol_stale_warned = True
+                    # frozen-but-alive payload: same disease as a dead one —
+                    # restart rather than advise
+                    self._restart_sol(
+                        f'no response {SOL_STALE_AFTER_INPUT:.0f}s after your last '
+                        'keystroke — the BMC may have dropped the SOL session')
+
+                if self.debug:
+                    self._debug_heartbeat(sol_fd)
+
+                self._maybe_recover_sol()
+
         except KeyboardInterrupt:
-            if self.ui is not None and self.ui.enabled:
-                self.ui.write_line('interrupted, exiting.', source='lconsole')
-            else:
-                print('\n[lconsole] interrupted, exiting.', flush=True)
+            self.exit_reason = 'interrupted'
         finally:
+            signal.signal(signal.SIGWINCH, old_winch)
+            signal.signal(signal.SIGTERM, old_term)
+            signal.signal(signal.SIGHUP, old_hup)
             if old_tc is not None:
                 try:
                     termios.tcsetattr(fd_in, termios.TCSADRAIN, old_tc)
-                except Exception:
+                except termios.error:
                     pass
-            if self.ui is not None:
-                self.ui.teardown()
             if self.sol is not None:
                 self.sol.stop()
-            if self.net is not None:
-                self.net.stop()
+            # \033[0m\033[?25h: undo any colour/hidden-cursor state the remote left
+            print(f'\r\033[K\033[0m\033[?25h\033[36m[lconsole]\033[0m disconnected from '
+                  f'{self.nodename} ({self.exit_reason or "session ended"}).', flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1296,56 +911,35 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         prog='lconsole',
         description=(
-            'Stream console output from a compute node.\n\n'
-            'MODES (mutually exclusive):\n'
-            '  lconsole node001              Default: SOL → netconsole handoff\n'
-            '  lconsole node001 --netconsole Netconsole UDP only (no SOL)\n'
-            '  lconsole node001 --sol-only   Interactive SOL only (no netconsole)\n'
+            'Interactive Serial-over-LAN console for a compute node.\n\n'
+            '  lconsole node001\n\n'
+            'EXIT: type <escape>.. at the start of a line (default: !..),\n'
+            'or press Ctrl-C (twice within 1s while the SOL session is up).\n'
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument('nodename', help='Compute node name (e.g. node001)')
 
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--netconsole', action='store_true',
-                      help='Netconsole UDP listener only — no SOL')
-    mode.add_argument('--sol-only', action='store_true',
-                      help='Interactive SOL only')
-
     parser.add_argument('--sol-backend', default='ipmi', choices=['ipmi', 'redfish'],
-                        help='SOL backend (default: ipmi; redfish: stub)')
-    parser.add_argument('--sol-timeout', type=int, default=DEFAULT_SOL_TIMEOUT,
-                        metavar='SEC',
-                        help='Seconds to wait for first netconsole pkt (default: %(default)s)')
-    parser.add_argument('--handoff-grace', type=int, default=DEFAULT_HANDOFF_GRACE,
-                        metavar='SEC',
-                        help='Grace seconds before closing SOL after netconsole seen (default: %(default)s)')
-    parser.add_argument('--ready-marker', default=DEFAULT_READY_MARKER,
-                        help='Marker that signals netconsole is ready (default: %(default)s)')
+                        help='SOL backend (default: %(default)s)')
     parser.add_argument('--sol-cipher', type=int, default=DEFAULT_SOL_CIPHER,
                         help='IPMI cipher suite (default: %(default)s)')
     parser.add_argument('--sol-fail-grace', type=int, default=DEFAULT_SOL_FAIL_GRACE,
                         metavar='SEC',
-                        help='Seconds to wait for netconsole after SOL exits early (default: %(default)s)')
+                        help='Seconds between reconnect attempts while SOL is down (default: %(default)s)')
     parser.add_argument('--sol-escape', default=DEFAULT_SOL_ESCAPE,
                         metavar='CHAR',
                         help='Escape char for exit (type <char>.. at line start; default: %(default)r)')
+    parser.add_argument('--debug', action='store_true',
+                        help='Print a periodic byte-count heartbeat (SOL rx, process '
+                             'alive) — tells a truly silent link apart from bytes '
+                             'arriving but not visibly rendering.')
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
     logger.info('User %s ran => lconsole %s', getpass.getuser(), ' '.join(sys.argv[1:]))
-
-    if args.netconsole:
-        mode = 'netconsole'
-    elif args.sol_only:
-        mode = 'sol'
-    else:
-        mode = 'hybrid'
-
-    conf    = Ini.read_ini(ini_file=LUNA_CONFIG_PATH)
-    details = resolve_node_details(args.nodename, conf)
 
     if args.sol_escape == '~' and (os.environ.get('SSH_TTY') or os.environ.get('SSH_CONNECTION')):
         _warn(
@@ -1355,21 +949,32 @@ def main(argv=None):
             '  a different character (e.g. --sol-escape !).'
         )
 
+    try:
+        conf    = Ini.read_ini(ini_file=LUNA_CONFIG_PATH)
+        details = resolve_node_details(args.nodename, conf)
+    except Exception as exc:
+        logger.exception('resolving %s failed', args.nodename)
+        print(f'lconsole: {exc}', file=sys.stderr)
+        return 1
+
     app = LConsole(
         nodename         = args.nodename,
         details          = details,
-        mode             = mode,
         sol_backend_name = args.sol_backend,
-        sol_timeout      = args.sol_timeout,
-        handoff_grace    = args.handoff_grace,
-        ready_marker     = args.ready_marker,
         cipher           = args.sol_cipher,
         sol_fail_grace   = args.sol_fail_grace,
         sol_escape       = args.sol_escape,
+        debug            = args.debug,
     )
-    app.start()
-    app.loop()
+    try:
+        app.start()
+    except Exception as exc:
+        logger.exception('starting console for %s failed', args.nodename)
+        print(f'lconsole: {exc}', file=sys.stderr)
+        return 1
+    app.run()
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

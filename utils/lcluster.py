@@ -433,7 +433,7 @@ class LCluster():
         """
         This method will fetch a records from the Luna 2 Daemon Database
         """
-        if text is True or text in ['PASS', 'ON', 'Booted']:
+        if text is True or text in ['PASS', 'ON']:
             text = colored(text, 'green')
         elif text in ['OFF', 'WARNING']:
             text = colored(text, 'yellow')
