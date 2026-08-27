@@ -108,10 +108,8 @@ def main(argv):
         NODES=None
     if ACTION:
         if (ACTION in ['status','on','off','reset','cycle']):
-            ACTION=item
             SUBSYSTEM='power'
         elif (ACTION in ['identify','noidentify']):
-            ACTION=item
             SUBSYSTEM='chassis'
     if (NODES is None and GROUP is None and RACK is None) or (ACTION is None):
         _print("ERROR :: Instruction incomplete. Nodes and Task expected.")
@@ -172,7 +170,7 @@ def get_all_nodes():
                    _print(f'ERROR :: returned unrecognized format while fetching all nodes')
                    sys.exit(3)
         elif (status_code in RET):
-            _print(f"ERROR :: {group} failed: {RET[status_code]}")
+            _print(f"ERROR :: fetching all nodes failed: {RET[status_code]}")
             sys.exit(3)
         else:
             # when we don't know how to handle the returned data
@@ -183,6 +181,7 @@ def get_all_nodes():
         sys.exit(3)
     except Exception as exp:
         _print(f'ERROR :: {exp}')
+        sys.exit(3)
 
 def get_group_nodes(group=None):
     if group:
@@ -265,7 +264,9 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
     if group:
         for singlegroup in group.split(','):
             if singlegroup == "All" or singlegroup == "all":
-                nodes=','.join(get_all_nodes())
+                all_nodes = get_all_nodes()
+                if all_nodes:
+                    nodes=','.join(all_nodes)
             else:
                 group_nodes = get_group_nodes(singlegroup)
                 if group_nodes:
@@ -275,7 +276,7 @@ def handleRequest(nodes=None, group=None, rack=None, subsystem=None, action=None
                         nodes+=','+group_nodes
     if rack:
         for singlerack in rack.split(','):
-            rack_nodes = get_rack_nodes(rack)
+            rack_nodes = get_rack_nodes(singlerack)
             if rack_nodes:
                 if not nodes:
                     nodes=rack_nodes
@@ -392,6 +393,8 @@ def handleResults(DATA,request_id=None,subsystem=None,action=None):
         if 'request_id' in DATA:
             request_id=str(DATA['request_id'])
         for control in DATA.keys():
+            if not isinstance(DATA[control], dict):
+                continue
             if 'request_id' in DATA[control]:
                 request_id=str(DATA[control]['request_id'])
             if 'failed' in DATA[control]:

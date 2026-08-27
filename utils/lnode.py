@@ -79,13 +79,21 @@ def get_token(settings):
     # Otherwise just fetch a new one
     data = {'username': settings['API']['USERNAME'], 'password': settings['API']['PASSWORD']}
     daemon_url = f"{settings['API']['PROTOCOL']}://{settings['API']['ENDPOINT']}/token"
-    response = requests.post(
-        daemon_url,
-        json=data,
-        stream=True,
-        timeout=3,
-        verify=(settings['API']['VERIFY_CERTIFICATE'].lower() == 'true'))
-    token = response.json()['token']
+    try:
+        response = requests.post(
+            daemon_url,
+            json=data,
+            stream=True,
+            timeout=3,
+            verify=(settings['API']['VERIFY_CERTIFICATE'].lower() == 'true'))
+    except requests.exceptions.RequestException as err:
+        print_fatal(f'Unable to reach {daemon_url}: {err}')
+        sys.exit(1)
+    try:
+        token = response.json()['token']
+    except (ValueError, KeyError):
+        print_fatal(f'Could not obtain a token from {daemon_url}: {response.text}')
+        sys.exit(1)
     return token
 
 
@@ -183,11 +191,12 @@ def main():
     parser_clear.add_argument('nodes', help='the node(s) to run the command on')
 
     args = parser.parse_args()
-    cli = CLI()
 
     if args.command == 'list':
+        cli = CLI()
         cli.list(args.node)
     elif args.command == 'clear':
+        cli = CLI()
         cli.clear(args.nodes)
     else:
         parser.print_help()

@@ -190,8 +190,10 @@ if DISPLAY_HELP:
 #Parse system and boot option URLs based on host
 
 sy_urls = get_system_urls(HOST)
-if len(sy_urls) == 1:
-    system = os.path.basename(sy_urls[0])
+if len(sy_urls) != 1:
+    print(f"Expected exactly one system on {HOST}, found {len(sy_urls)}.", file=sys.stderr)
+    sys.exit(1)
+system = os.path.basename(sy_urls[0])
 bo_urls = get_bootoption_urls(HOST, system)
 
 if MODE == "list":
@@ -203,9 +205,9 @@ if MODE == "list":
 bootoption = {}
 for bo_url in bo_urls:
     id, name, desc = get_boot_option_id_name_desc(bo_url)
-    bootoption[name] = desc
+    bootoption[id] = desc
     if MODE == "list":
-        print(f"{i:<6}|{name:<16}|{desc:<58}")
+        print(f"{id:<6}|{name:<16}|{desc:<58}")
 
 #Retrieve and output the current boot order
 
@@ -214,7 +216,7 @@ if MODE == "get":
     bootorder = get_bootorder(system)
     i = 1
     for bo in bootorder:
-        print(f"{i} - {bo} {bootoption[bo]}")
+        print(f"{i} - {bo} {bootoption.get(bo, '')}")
         i += 1
 
 #Set the boot order

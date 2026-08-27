@@ -32,20 +32,20 @@ requests.packages.urllib3.disable_warnings()
 # ============================================================================
 
 def main(argv):
+    ACTION="who"
     for i in range(0, len(argv)):
         if (argv[i] == "-h" or argv[i] == "--help"):
             callHelp()
             exit()
         elif (argv[i] == "-s" or argv[i] == "--set"):
             ACTION="set"
+            break
         elif (argv[i] == "-w" or argv[i] == "--who"):
             ACTION="who"
+            break
         elif (argv[i] == "-a" or argv[i] == "--all"):
             ACTION="all"
-        else:
-            ACTION="who"
-    if (len(argv) == 0):
-        ACTION="who"
+            break
     handleRequest(action=ACTION)
     exit()
 
@@ -163,6 +163,7 @@ def handleRequest(action=None):
         except Exception as exp:
             exc_type, exc_obj, exc_tb = sys.exc_info()
             print(f"{exp}, {exc_type}, in {exc_tb.tb_lineno}")
+            exit(1)
 
 RETRY=True
 def retry():
