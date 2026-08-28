@@ -2,3 +2,7 @@ __pycache__/
 .vscode
 *.egg-info
 build/
+# test artifacts
+.coverage
+htmlcov/
+.pytest_cache/
