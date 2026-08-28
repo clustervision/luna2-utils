@@ -19,32 +19,23 @@
 
 
 
-"""
-lcluster Utility for Trinity Project
-"""
-__author__      = "Sumit Sharma"
-__copyright__   = "Copyright 2025, Luna2 Project [UTILITY]"
-__license__     = "GPL"
-__version__     = "2.1"
-__maintainer__  = "Sumit Sharma"
-__email__       = "sumit.sharma@clustervision.com"
-__status__      = "Development"
+"""Console-script shim that runs the legacy bash ``lchroot`` (``lchroot-legacy``)."""
 
-
-import os
 import subprocess
-
-def _run(bash_script):
-    """
-    This method will run the lchroot.
-    """
-    return subprocess.call(bash_script, shell=True)
+import sys
+from pathlib import Path
 
 
-def lchroot():
+def lchroot_legacy() -> int:
+    """Run the legacy bash lchroot (kept as the ``lchroot-legacy`` console script).
+
+    The canonical ``lchroot`` command now points at the bubblewrap-based Python
+    implementation in ``utils.lchroot``; this keeps the original bash chroot available as a
+    fallback (and the behavioural oracle) under ``lchroot-legacy``.
+
+    Runs the script with **bash** (its shebang is ``#!/bin/bash`` and it uses bashisms — a
+    bare ``sh`` is dash on Debian/Ubuntu and would break it), forwarding the caller's
+    arguments as a real argv list — never a shell string — so there is no injection surface.
     """
-    This method will pass the path of lchroot for pip installation.
-    """
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    response = f'sh {dir_path}/lchroot'
-    return _run(response)
+    script = Path(__file__).resolve().parent / "lchroot-legacy"
+    return subprocess.call(["bash", str(script), *sys.argv[1:]])

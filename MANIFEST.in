@@ -3,8 +3,12 @@ include VERSION.txt
 include README.md
 include utils/*
 include utils/utils/*.py
-include utils/lchroot
 include utils/lsosreport
 include utils/bootutil.tclsh
 include utils/slurm.ini
 include utils/*VERSION.txt
+recursive-include utils/lchroot *.py
+recursive-include utils/qemu_static *.py
+recursive-include utils/qemu_static qemu-*-static
+include utils/lchroot-legacy
+include completions/lchroot.bash
