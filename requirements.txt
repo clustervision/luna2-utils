@@ -9,4 +9,3 @@ fire==0.5.0
 urllib3==1.26.16
 shtab==1.7.1
 argcomplete==3.6.2
-Flask==2.3.3
