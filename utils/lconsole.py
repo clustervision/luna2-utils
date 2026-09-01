@@ -66,11 +66,13 @@ __email__       = 'support@clustervision.com'
 __status__      = 'Development'
 
 import argparse
+import base64
 import fcntl
 import getpass
 import logging
 import os
 import random
+import re
 import select
 import signal
 import socket
@@ -231,6 +233,271 @@ def resolve_node_details(nodename, conf):
         'boot_ip': boot_ip, 'bmc_ip': bmc_ip,
         'bmcsetup_name': bmcsetup_name, 'bmcsetup': bmcsetup,
     }
+
+
+# ---------------------------------------------------------------------------
+# Console-port detection & three-layer diagnosis (--detect-port / --diagnose)
+#
+# Which serial port the firmware redirects to is a BIOS *setting*, not a
+# board property — two identical boards can differ, and it changes the moment
+# someone edits the setup screen. So it can only be read off the machine:
+#   1. ACPI SPCR — the firmware declaring its redirection target and address.
+#      Authoritative where present (Linux itself consumes it to pick console
+#      and earlycon). Absence usually means redirection is off, or the
+#      firmware simply does not publish the table.
+#   2. /proc/tty/driver/serial — the address-to-ttySX map with tx counters;
+#      the port whose tx climbs is the one actually carrying console output.
+# Both are read over SSH. No SOL session is needed or taken, so this never
+# competes with a live lconsole or sol-grab session.
+# ---------------------------------------------------------------------------
+
+UART_ADDRESSES = {0x3f8: 'ttyS0', 0x2f8: 'ttyS1', 0x3e8: 'ttyS2', 0x2e8: 'ttyS3'}
+
+
+def _node_ssh(host, cmd, timeout=12):
+    result = subprocess.run(
+        ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
+         '-o', 'StrictHostKeyChecking=no', f'root@{host}', cmd],
+        capture_output=True, timeout=timeout)
+    return result.returncode, result.stdout, result.stderr
+
+
+def parse_spcr(raw):
+    """Base address from a raw SPCR table, or None if absent/truncated.
+
+    Layout: 36-byte ACPI header, interface type at 36, then a Generic Address
+    Structure at 40 whose 8-byte address sits at offset 44, little-endian.
+    """
+    if len(raw) < 52:
+        return None
+    return int.from_bytes(raw[44:52], 'little')
+
+
+def parse_serial_driver(text):
+    """/proc/tty/driver/serial -> {ttySX: (io_address, tx)} for real UARTs."""
+    ports = {}
+    for line in text.splitlines():
+        m = re.match(r'^(\d+):\s+uart:(\S+)\s+port:([0-9A-Fa-f]+)\s+irq:\S+'
+                     r'(?:\s+tx:(\d+))?', line.strip())
+        if not m or m.group(2) == 'unknown':
+            continue
+        ports[f'ttyS{m.group(1)}'] = (int(m.group(3), 16), int(m.group(4) or 0))
+    return ports
+
+
+def detect_console_port(host):
+    """Return (port, io_address, evidence) for the node's console UART."""
+    rc, out, err = _node_ssh(
+        host,
+        'base64 /sys/firmware/acpi/tables/SPCR 2>/dev/null; echo ---; '
+        'cat /proc/tty/driver/serial')
+    if rc != 0:
+        detail = err.decode(errors='replace').strip() or 'connection failed'
+        raise RuntimeError(f'cannot SSH to {host}: {detail}')
+    b64, _, serial_txt = out.decode(errors='replace').partition('---\n')
+    if b64.strip():
+        try:
+            addr = parse_spcr(base64.b64decode(b64))
+        except ValueError:
+            addr = None
+        if addr in UART_ADDRESSES:
+            return UART_ADDRESSES[addr], addr, 'SPCR (the firmware declares it)'
+    first = parse_serial_driver(serial_txt)
+    time.sleep(3)
+    rc, out, _ = _node_ssh(host, 'cat /proc/tty/driver/serial')
+    second = parse_serial_driver(out.decode(errors='replace')) if rc == 0 else first
+    moving = [t for t, (_, tx) in second.items() if tx > first.get(t, (0, 0))[1]]
+    if len(moving) == 1:
+        port = moving[0]
+        return port, second[port][0], 'tx counter climbing (console output observed live)'
+    used = sorted(((tx, t, a) for t, (a, tx) in second.items() if tx > 0), reverse=True)
+    if used:
+        tx, port, addr = used[0]
+        return port, addr, f'historical tx ({tx} bytes ever sent; nothing moved during the check)'
+    raise RuntimeError('no SPCR and no serial port has ever transmitted — '
+                       'console redirection is probably off in the BIOS')
+
+
+def suggested_kerneloptions(port, addr, baud=115200):
+    return (f'earlycon=uart8250,io,0x{addr:x},{baud}n8 console=tty0 '
+            f'console=uart,io,0x{addr:x},{baud}n8 console={port},{baud}n8')
+
+
+
+def _maybe_b64(value):
+    """The daemon transports free-text fields like kerneloptions base64-encoded
+    over the raw API (the luna CLI decodes them before display). A real options
+    string has spaces/commas, so it can never false-positive as base64."""
+    if not value:
+        return value or ''
+    try:
+        decoded = base64.b64decode(value, validate=True).decode()
+    except (ValueError, UnicodeDecodeError):
+        return value
+    return decoded if decoded.isprintable() else value
+
+
+def analyze_kerneloptions(opts):
+    """What a kernel options string means for serial console visibility."""
+    tokens = (opts or '').split()
+    consoles = [t[len('console='):] for t in tokens if t.startswith('console=')]
+    serial = [c for c in consoles if not c.startswith('tty0')]
+    named = [c.split(',')[0] for c in serial if c.startswith('ttyS')]
+    dev_console = consoles[-1].split(',')[0] if consoles else None
+    baud = None
+    for c in reversed(serial):
+        m = re.search(r'(\d{4,6})', ','.join(c.split(',')[1:]))
+        if m:
+            baud = int(m.group(1))
+            break
+    warnings = []
+    if not serial:
+        warnings.append('no serial console= at all — nothing will ever reach SOL')
+    for c in serial:
+        if c.startswith('ttyS') and ',' not in c:
+            warnings.append(f'console={c} has no baud — the kernel defaults to '
+                            f'9600, which will not match a 115200-class SOL')
+    for t in tokens:
+        if t.startswith('earlycon=') and not t.startswith(('earlycon=uart',
+                                                             'earlycon=pl011')):
+            warnings.append(f'{t} is not a valid earlycon spec — the kernel '
+                            f'ignores it (use earlycon=uart8250,io,<addr>,<baud>n8, '
+                            f'or bare earlycon on SPCR firmware)')
+    if len(named) > 1:
+        warnings.append('more than one named ttyS console — the last one steals '
+                        '/dev/console, and on EL8 the second never binds at all')
+    if serial and not any(t.startswith('earlycon') for t in tokens):
+        warnings.append('no earlycon — output from before the serial driver binds is '
+                        'lost, so an early crash looks like a node that never started')
+    return {'consoles': consoles, 'dev_console': dev_console, 'named': named,
+            'baud': baud, 'warnings': warnings}
+
+
+def _sol_info(bmc_ip, bmcsetup, cipher):
+    """(enabled, bit_rate_kbps) from 'ipmitool sol info'."""
+    env = os.environ.copy()
+    env['IPMI_PASSWORD'] = bmcsetup['password']
+    cmd = ['ipmitool', '-E', '-I', 'lanplus', '-C', str(cipher),
+           '-H', bmc_ip, '-U', bmcsetup['username'], 'sol', 'info']
+    result = subprocess.run(cmd, env=env, capture_output=True, timeout=20)
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors='replace').strip()
+        raise RuntimeError(detail or 'ipmitool sol info failed')
+    enabled, rate = None, None
+    for line in result.stdout.decode(errors='replace').splitlines():
+        key, _, value = line.partition(':')
+        key, value = key.strip().lower(), value.strip()
+        if key == 'enabled':
+            enabled = value.lower() == 'true'
+        elif 'bit rate' in key:
+            if rate is None or key.startswith('volatile'):
+                rate = value
+    return enabled, rate
+
+
+def run_detect_port(nodename, details, cipher=DEFAULT_SOL_CIPHER, baud=None):
+    host = details['boot_ip']
+    print(f'[lconsole] Probing {nodename} ({host}) over SSH — no SOL session is taken.')
+    port, addr, evidence = detect_console_port(host)
+    baud_source = 'set with --baud'
+    if not baud and details.get('bmc_ip') and details.get('bmcsetup'):
+        try:
+            _, rate = _sol_info(details['bmc_ip'], details['bmcsetup'], cipher)
+            baud = int(float(rate) * 1000)
+            baud_source = 'reported by the BMC'
+        except Exception:
+            pass
+    if not baud:
+        baud, baud_source = 115200, 'default'
+    options = suggested_kerneloptions(port, addr, baud)
+    print(f'''
+  Console port : {port}  (io 0x{addr:x})
+  Evidence     : {evidence}
+  Baud         : {baud}  ({baud_source})
+
+  Kernel options for this hardware:
+    {options}
+
+  Apply to the image (or a group/node override):
+    luna osimage change --quick-kerneloptions "{options}" <osimage>
+''')
+    return 0
+
+
+def run_diagnose(nodename, details, conf, cipher, baud=None):
+    failures = 0
+    node, group = details['node'], details['group']
+    image_name = node.get('osimage') or group.get('osimage')
+    image_kopts = ''
+    if image_name:
+        try:
+            data = call_api(conf, f'/config/osimage/{image_name}')
+            image = data.get('config', {}).get('osimage', {}).get(image_name) or {}
+            image_kopts = _maybe_b64(image.get('kerneloptions'))
+        except Exception as exc:
+            _warn(f'Could not fetch osimage {image_name}: {exc}')
+    kopts = (_maybe_b64(node.get('kerneloptions')) or
+             _maybe_b64(group.get('kerneloptions')) or image_kopts)
+    override = _maybe_b64(node.get('kerneloptions')) or _maybe_b64(group.get('kerneloptions'))
+    source = ('node/group override' if override and override != image_kopts
+              else f'osimage {image_name}')
+    print(f'[lconsole] Diagnosing {nodename} — a blank console hides one of three layers:\n')
+
+    layer_a = analyze_kerneloptions(kopts)
+    print(f'  (a) Kernel options ({source}):')
+    print(f'      {kopts or "(none)"}')
+    if layer_a['dev_console']:
+        print(f'      /dev/console (installer, systemd, login prompt) → '
+              f'{layer_a["dev_console"]}  (the last console= wins)')
+    for warning in layer_a['warnings']:
+        failures += 1
+        print(f'      WARN: {warning}')
+    if not layer_a['warnings']:
+        print('      OK')
+
+    print('\n  (b) BMC Serial-over-LAN:')
+    bmc_baud = None
+    try:
+        enabled, rate = _sol_info(details['bmc_ip'], details['bmcsetup'], cipher)
+        print(f'      Enabled: {enabled}   Bit rate: {rate or "?"} kbps')
+        try:
+            bmc_baud = int(float(rate) * 1000)
+        except (TypeError, ValueError):
+            pass
+        if enabled is False:
+            failures += 1
+            print('      WARN: SOL is disabled on the BMC — enable it there '
+                  '(lconsole also tries once per session)')
+        if bmc_baud and layer_a['baud'] and abs(bmc_baud - layer_a['baud']) > 1:
+            failures += 1
+            print(f'      WARN: the BMC runs {rate} kbps but the kernel options say '
+                  f'{layer_a["baud"]} baud — expect garbage or silence')
+    except Exception as exc:
+        print(f'      Could not query over IPMI: {exc}')
+        print('      On a Redfish-only BMC, check Managers/<id>/SerialInterfaces by hand.')
+
+    print('\n  (c) The port the node actually uses (SPCR / tx counters):')
+    try:
+        port, addr, evidence = detect_console_port(details['boot_ip'])
+        print(f'      {port} (io 0x{addr:x}) — {evidence}')
+        if layer_a['dev_console'] and layer_a['dev_console'] not in ('tty0', port):
+            failures += 1
+            best_baud = baud or bmc_baud or layer_a['baud'] or 115200
+            print(f'      WARN: the kernel options send /dev/console to '
+                  f'{layer_a["dev_console"]}, but this machine\'s console port is {port}.')
+            print('      Fix with:')
+            print(f'        luna osimage change --quick-kerneloptions '
+                  f'"{suggested_kerneloptions(port, addr, best_baud)}" {image_name}')
+        elif layer_a['dev_console'] == port:
+            print('      OK — matches the kernel options')
+    except Exception as exc:
+        print(f'      Unknown: {exc}')
+        print('      A booted, SSH-reachable node is needed; TRIX-2047 will record '
+              'this in the node inventory at install time.')
+
+    print(f'\n[lconsole] Diagnosis: {failures} problem(s) found.'
+          if failures else '\n[lconsole] Diagnosis: no problems found.')
+    return 1 if failures else 0
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +736,10 @@ class IpmiSolBackend(SolBackend):
         return self._base_cmd() + ['sol', 'activate'], self._env()
 
 
+class RedfishConsoleIsIpmi(RuntimeError):
+    """The BMC's Redfish declares IPMI as its (only) serial console transport."""
+
+
 class RedfishSolBackend(SolBackend):
     """
     Redfish SerialConsole SSH backend.
@@ -488,6 +759,13 @@ class RedfishSolBackend(SolBackend):
         '/redfish/v1/Systems/Self',
     ]
 
+    MANAGER_PATHS = [
+        '/redfish/v1/Managers/Self',
+        '/redfish/v1/Managers/1',
+        '/redfish/v1/Managers/bmc',
+        '/redfish/v1/Managers/iDRAC.Embedded.1',
+    ]
+
     def __init__(self, nodename, bmc_ip, bmcsetup, system_path=None):
         super().__init__(nodename, bmc_ip, bmcsetup)
         self._system_path_override = system_path
@@ -504,9 +782,24 @@ class RedfishSolBackend(SolBackend):
         resp.raise_for_status()
         return resp.json()
 
+    def _walk_collection(self, collection):
+        """Member paths of a Redfish collection — the vendor-proof discovery.
+        An empty list (unreachable, unparseable, no members) falls back to the
+        known per-vendor paths, and --redfish-path remains the manual escape."""
+        try:
+            data = self._redfish_get(collection)
+        except requests.RequestException:
+            return []
+        return [m.get('@odata.id') for m in data.get('Members') or []
+                if m.get('@odata.id')]
+
     def _discover_system_path(self):
         if self._system_path_override:
             return self._system_path_override
+        members = self._walk_collection('/redfish/v1/Systems')
+        if members:
+            logger.debug('Redfish Systems collection members: %s', members)
+            return members[0]
         for path in self.SYSTEM_PATHS:
             try:
                 self._redfish_get(path)
@@ -517,8 +810,39 @@ class RedfishSolBackend(SolBackend):
                     continue
                 raise
         raise RuntimeError(
-            f'Cannot find a valid Redfish System path on {self.bmc_ip}. '
-            f'Tried: {self.SYSTEM_PATHS}')
+            f'No Redfish System resource found on {self.bmc_ip}: the Systems '
+            f'collection lists no members and none of the usual paths answer '
+            f'({", ".join(self.SYSTEM_PATHS)}). If you know the path, pass '
+            f'--redfish-path /redfish/v1/Systems/<id>.')
+
+    def _connect_types(self, system_data):
+        """SerialConsole.ConnectTypesSupported from the System, else the Manager.
+
+        AMI MegaRAC (GIGABYTE R181 class) publishes it on Managers/Self and
+        offers only IPMI there — meaning IPMI SOL *is* that BMC's sanctioned
+        serial console, and there is nothing SSH-shaped to discover.
+        """
+        types = {str(t).upper()
+                 for t in (system_data.get('SerialConsole') or {})
+                          .get('ConnectTypesSupported') or []}
+        if types:
+            return types
+        for path in (self._walk_collection('/redfish/v1/Managers')
+                     or self.MANAGER_PATHS):
+            try:
+                manager = self._redfish_get(path)
+            except requests.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 404:
+                    continue
+                return types
+            except requests.RequestException:
+                return types
+            found = {str(t).upper()
+                     for t in (manager.get('SerialConsole') or {})
+                              .get('ConnectTypesSupported') or []}
+            if found:
+                return found
+        return types
 
     def _discover_ssh_port(self):
         static = self.bmcsetup.get('redfish_port')
@@ -531,9 +855,16 @@ class RedfishSolBackend(SolBackend):
         ssh_info    = data.get('SerialConsole', {}).get('SSH', {})
 
         if not ssh_info:
+            types = self._connect_types(data)
+            if 'IPMI' in types and 'SSH' not in types:
+                raise RedfishConsoleIsIpmi(
+                    f'Redfish on {self.bmc_ip} declares IPMI as its serial console '
+                    f'transport (ConnectTypesSupported = {sorted(types)}) — this '
+                    f'BMC has no SSH console.')
             raise RuntimeError(
                 f'No SerialConsole.SSH property in Redfish response from '
-                f'{self.bmc_ip}{system_path}. '
+                f'{self.bmc_ip}{system_path} (ConnectTypesSupported = '
+                f'{sorted(types) if types else "unpublished"}). '
                 f'Your BMC firmware may not support Redfish serial console.')
 
         if not ssh_info.get('ServiceEnabled', False):
@@ -553,7 +884,7 @@ class RedfishSolBackend(SolBackend):
         return int(port)
 
     def prepare(self):
-        _info(f'Querying Redfish on {self.bmc_ip} for serial console port...')
+        _info(f'Querying Redfish on {self.bmc_ip} for its serial console...')
         self._ssh_port = self._discover_ssh_port()
         _info(f'Redfish: serial console SSH port = {self._ssh_port}')
         if not shutil.which('sshpass'):
@@ -598,12 +929,14 @@ class LConsole:
     """
 
     def __init__(self, nodename, details,
-                 sol_backend_name='ipmi', cipher=DEFAULT_SOL_CIPHER,
+                 sol_backend_name='ipmi', redfish_path=None,
+                 cipher=DEFAULT_SOL_CIPHER,
                  sol_fail_grace=DEFAULT_SOL_FAIL_GRACE,
                  sol_escape=DEFAULT_SOL_ESCAPE, debug=False):
         self.nodename         = nodename
         self.details          = details
         self.sol_backend_name = sol_backend_name
+        self.redfish_path     = redfish_path
         self.cipher           = cipher
         self.sol_fail_grace   = sol_fail_grace
         self.sol_escape       = sol_escape
@@ -639,7 +972,7 @@ class LConsole:
 
     def _session_line(self):
         bmc_ip = self.details['bmc_ip'] or 'N/A'
-        escape = f'{self.sol_escape}.. or Ctrl-C to exit'
+        escape = f'exit: {self.sol_escape}.. or Ctrl-C twice'
         return f'{self.nodename}  |  BMC: {bmc_ip}  |  {self.sol_backend_name.upper()} SOL  |  {escape}'
 
     def _banner(self):
@@ -671,13 +1004,21 @@ class LConsole:
         if self.sol_backend_name == 'ipmi':
             return IpmiSolBackend(self.nodename, bmc_ip, bmcsetup, cipher=self.cipher)
         if self.sol_backend_name == 'redfish':
-            return RedfishSolBackend(self.nodename, bmc_ip, bmcsetup)
+            return RedfishSolBackend(self.nodename, bmc_ip, bmcsetup,
+                                     system_path=self.redfish_path)
         raise RuntimeError(f'Unknown SOL backend: {self.sol_backend_name}')
 
     def start(self):
         _info(f'Starting {self.sol_backend_name.upper()} SOL...')
         self.sol = self._build_sol()
-        self.sol.start(winsize=terminal_size())
+        try:
+            self.sol.start(winsize=terminal_size())
+        except RedfishConsoleIsIpmi as exc:
+            _info(str(exc))
+            _info('Falling back to IPMI SOL — the transport this BMC declares via Redfish.')
+            self.sol_backend_name = 'ipmi'
+            self.sol = self._build_sol()
+            self.sol.start(winsize=terminal_size())
 
     # ── event handling ──
 
@@ -912,29 +1253,50 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         prog='lconsole',
         description=(
-            'Interactive Serial-over-LAN console for a compute node.\n\n'
-            '  lconsole node001\n\n'
-            'EXIT: type <escape>.. at the start of a line (default: !..),\n'
-            'or press Ctrl-C (twice within 1s while the SOL session is up).\n'
+            'Live Serial-over-LAN console for a compute node, through its BMC.\n\n'
+            '  lconsole node001                     open the console (IPMI SOL)\n'
+            '  lconsole node001 --sol-backend redfish\n'
+            '  lconsole node001 --detect-port       which serial port is the console?\n'
+            '  lconsole node001 --diagnose          why is my console blank?\n\n'
+            'Exit a session with <escape>.. at the start of a line (default: !..),\n'
+            'or press Ctrl-C twice within one second.\n'
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument('nodename', help='Compute node name (e.g. node001)')
+    parser.add_argument('nodename', help='compute node name, e.g. node001')
 
     parser.add_argument('--sol-backend', default='ipmi', choices=['ipmi', 'redfish'],
-                        help='SOL backend (default: %(default)s)')
+                        help='SOL transport; redfish falls back to IPMI when the '
+                             'BMC declares that as its console (default: %(default)s)')
     parser.add_argument('--sol-cipher', type=int, default=DEFAULT_SOL_CIPHER,
+                        metavar='N',
                         help='IPMI cipher suite (default: %(default)s)')
     parser.add_argument('--sol-fail-grace', type=int, default=DEFAULT_SOL_FAIL_GRACE,
                         metavar='SEC',
-                        help='Seconds between reconnect attempts while SOL is down (default: %(default)s)')
+                        help='seconds between reconnect attempts while SOL is down '
+                             '(default: %(default)s)')
     parser.add_argument('--sol-escape', default=DEFAULT_SOL_ESCAPE,
                         metavar='CHAR',
-                        help='Escape char for exit (type <char>.. at line start; default: %(default)r)')
+                        help='escape character for exit, typed as <char>.. at the '
+                             'start of a line (default: %(default)r)')
+    parser.add_argument('--detect-port', action='store_true',
+                        help='report which serial port carries the node\'s console '
+                             '(ACPI SPCR, then tx counters, over SSH) and print the '
+                             'kernel options to set — no console is opened')
+    parser.add_argument('--diagnose', action='store_true',
+                        help='check the three layers a blank console hides: kernel '
+                             'options, BMC SOL settings, and the port the node '
+                             'actually uses — no console is opened')
+    parser.add_argument('--baud', type=int, default=None, metavar='BAUD',
+                        help='serial speed for suggested kernel options (default: '
+                             'what the BMC reports, else 115200)')
+    parser.add_argument('--redfish-path', default=None, metavar='PATH',
+                        help='Redfish System resource path, e.g. '
+                             '/redfish/v1/Systems/Self, when automatic discovery '
+                             'cannot find it')
     parser.add_argument('--debug', action='store_true',
-                        help='Print a periodic byte-count heartbeat (SOL rx, process '
-                             'alive) — tells a truly silent link apart from bytes '
-                             'arriving but not visibly rendering.')
+                        help='periodic byte-count heartbeat — tells a truly silent '
+                             'link apart from bytes arriving but not rendering')
     return parser.parse_args(argv)
 
 
@@ -958,10 +1320,24 @@ def main(argv=None):
         print(f'lconsole: {exc}', file=sys.stderr)
         return 1
 
+    if args.diagnose or args.detect_port:
+        try:
+            if args.diagnose:
+                return run_diagnose(args.nodename, details, conf, args.sol_cipher,
+                                    baud=args.baud)
+            return run_detect_port(args.nodename, details, cipher=args.sol_cipher,
+                                   baud=args.baud)
+        except Exception as exc:
+            logger.exception('%s failed for %s',
+                             'diagnose' if args.diagnose else 'detect-port', args.nodename)
+            print(f'lconsole: {exc}', file=sys.stderr)
+            return 1
+
     app = LConsole(
         nodename         = args.nodename,
         details          = details,
         sol_backend_name = args.sol_backend,
+        redfish_path     = args.redfish_path,
         cipher           = args.sol_cipher,
         sol_fail_grace   = args.sol_fail_grace,
         sol_escape       = args.sol_escape,

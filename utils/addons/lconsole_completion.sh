@@ -94,14 +94,14 @@ _lconsole() {
             mapfile -t COMPREPLY < <(compgen -W "ipmi redfish" -- "$cur")
             return
             ;;
-        --sol-cipher|--sol-fail-grace|--sol-escape)
+        --sol-cipher|--sol-fail-grace|--sol-escape|--baud|--redfish-path)
             # these take a free-form value; nothing sensible to offer
             return
             ;;
     esac
 
     if [[ "$cur" == -* ]]; then
-        mapfile -t COMPREPLY < <(compgen -W "--sol-backend --sol-cipher --sol-fail-grace --sol-escape --debug --help" -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W "--sol-backend --sol-cipher --sol-fail-grace --sol-escape --detect-port --diagnose --baud --redfish-path --debug --help" -- "$cur")
         return
     fi
 
