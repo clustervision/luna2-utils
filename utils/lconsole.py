@@ -209,6 +209,18 @@ def get_bmcsetup_config(name, conf):
     return bmcsetup
 
 
+def get_redfishsetup_config(name, conf):
+    """Tolerant: a 2.1 daemon has no redfishsetup endpoint, and a node without
+    one is normal — the Redfish backend then falls back to bmcsetup credentials."""
+    try:
+        data = call_api(conf, f'/config/redfishsetup/{name}')
+        return data.get('config', {}).get('redfishsetup', {}).get(name)
+    except Exception as exc:
+        logger.info('redfishsetup %s not resolvable (%s) — using bmcsetup credentials',
+                    name, exc)
+        return None
+
+
 def resolve_node_details(nodename, conf):
     node    = get_node_config(nodename, conf)
     boot_ip = None
@@ -228,10 +240,14 @@ def resolve_node_details(nodename, conf):
     group         = get_group_config(groupname, conf) if groupname else {}
     bmcsetup_name = node.get('bmcsetupname') or group.get('bmcsetupname')
     bmcsetup      = get_bmcsetup_config(bmcsetup_name, conf) if bmcsetup_name else None
+    redfishsetup_name = node.get('redfishsetup') or group.get('redfishsetup')
+    redfishsetup      = (get_redfishsetup_config(redfishsetup_name, conf)
+                         if redfishsetup_name else None)
     return {
         'node': node, 'group': group,
         'boot_ip': boot_ip, 'bmc_ip': bmc_ip,
         'bmcsetup_name': bmcsetup_name, 'bmcsetup': bmcsetup,
+        'redfishsetup_name': redfishsetup_name, 'redfishsetup': redfishsetup,
     }
 
 
@@ -766,17 +782,36 @@ class RedfishSolBackend(SolBackend):
         '/redfish/v1/Managers/iDRAC.Embedded.1',
     ]
 
-    def __init__(self, nodename, bmc_ip, bmcsetup, system_path=None):
+    def __init__(self, nodename, bmc_ip, bmcsetup, system_path=None,
+                 redfishsetup=None):
         super().__init__(nodename, bmc_ip, bmcsetup)
         self._system_path_override = system_path
         self._ssh_port = None
+        # Luna's redfishsetup is the account and endpoint provisioned FOR
+        # Redfish; prefer it wherever it is set, fall back to bmcsetup so a
+        # 2.1 daemon or an unconfigured node keeps working unchanged.
+        rf = redfishsetup or {}
+        account = next((a for a in rf.get('accounts') or []
+                        if a.get('username') and a.get('password')), None)
+        if account:
+            self._rf_user, self._rf_pass = account['username'], account['password']
+            self._cred_source = ("redfishsetup account "
+                                 + (account.get('name') or account['username']))
+        else:
+            self._rf_user, self._rf_pass = bmcsetup['username'], bmcsetup['password']
+            self._cred_source = 'bmcsetup credentials'
+        scheme = rf.get('scheme') or 'https'
+        port   = rf.get('port')
+        self._rf_base   = f"{scheme}://{bmc_ip}" + (f":{port}" if port else '')
+        self._rf_verify = bool(rf.get('verify'))
+        logger.info('Redfish endpoint %s for %s, using %s',
+                    self._rf_base, nodename, self._cred_source)
 
     def _redfish_get(self, path):
-        url  = f'https://{self.bmc_ip}{path}'
         resp = requests.get(
-            url,
-            auth=(self.bmcsetup['username'], self.bmcsetup['password']),
-            verify=False,
+            f'{self._rf_base}{path}',
+            auth=(self._rf_user, self._rf_pass),
+            verify=self._rf_verify,
             timeout=10,
         )
         resp.raise_for_status()
@@ -899,7 +934,7 @@ class RedfishSolBackend(SolBackend):
             'ssh',
             '-tt',                          # force PTY allocation
             '-p', str(self._ssh_port),
-            '-l', self.bmcsetup['username'],
+            '-l', self._rf_user,
             '-o', 'StrictHostKeyChecking=no',
             '-o', 'UserKnownHostsFile=/dev/null',
             '-o', 'LogLevel=ERROR',
@@ -910,7 +945,7 @@ class RedfishSolBackend(SolBackend):
             self.bmc_ip,
         ]
         if shutil.which('sshpass'):
-            cmd = ['sshpass', '-p', self.bmcsetup['password']] + cmd
+            cmd = ['sshpass', '-p', self._rf_pass] + cmd
         env = os.environ.copy()
         env['DISPLAY'] = ''   # suppress graphical password prompts
         return cmd, env
@@ -1005,7 +1040,8 @@ class LConsole:
             return IpmiSolBackend(self.nodename, bmc_ip, bmcsetup, cipher=self.cipher)
         if self.sol_backend_name == 'redfish':
             return RedfishSolBackend(self.nodename, bmc_ip, bmcsetup,
-                                     system_path=self.redfish_path)
+                                     system_path=self.redfish_path,
+                                     redfishsetup=self.details.get('redfishsetup'))
         raise RuntimeError(f'Unknown SOL backend: {self.sol_backend_name}')
 
     def start(self):

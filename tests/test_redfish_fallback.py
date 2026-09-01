@@ -77,4 +77,17 @@ assert e._discover_ssh_port() == 2222
 o = ExoticIdFake('nodeY', '10.148.0.10', bmcsetup, system_path='/redfish/v1/Systems/Forced')
 assert o._discover_system_path() == '/redfish/v1/Systems/Forced'
 
+# credentials: a redfishsetup account wins over bmcsetup; endpoint honours
+# scheme/port/verify; absence of redfishsetup falls back to bmcsetup untouched
+rf = {'scheme': 'https', 'port': 8443, 'verify': True,
+      'accounts': [{'name': 'hw', 'username': 'operator', 'password': 'secret',
+                    'role': 'Operator'}]}
+c = SshCapableFake('nodeZ', '10.148.0.11', bmcsetup, redfishsetup=rf)
+assert (c._rf_user, c._rf_pass) == ('operator', 'secret')
+assert c._rf_base == 'https://10.148.0.11:8443' and c._rf_verify is True
+
+d = SshCapableFake('nodeZ', '10.148.0.11', bmcsetup)
+assert (d._rf_user, d._rf_pass) == ('admin', 'x')
+assert d._rf_base == 'https://10.148.0.11' and d._rf_verify is False
+
 print('OK: Redfish capability probe — IPMI-only BMC signals fallback, SSH BMC discovers port')
