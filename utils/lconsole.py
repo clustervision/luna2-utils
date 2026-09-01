@@ -117,6 +117,10 @@ SOL_RECONNECT_JITTER_MAX = 5.0  # random 0..N-second delay before each reconnect
 # be reconnected out from under the operator indefinitely. Any received byte
 # resets the count and ends the probing.
 SOL_EXPECT_OUTPUT_SECS   = 10.0
+# Silence alone is never evidence of a fault (see the note in __init__), so this
+# only ever prints — it must not reconnect. It exists because the alternative is
+# a screen that has been dead for minutes and has said nothing about it.
+SOL_SILENT_NOTICE_SECS   = 60.0
 MAX_SILENT_RECONNECTS    = 12   # covers the observed ~10-cycle rocky transition
 # attempt, so a fleet-wide event (mass reboot, common BMC hiccup) doesn't turn
 # hundreds/thousands of concurrent lconsole sessions into a synchronized retry
@@ -995,6 +999,10 @@ class LConsole:
         # post-reconnect liveness probe (see SOL_EXPECT_OUTPUT_SECS)
         self._sol_probe_deadline    = None
         self._silent_reconnects     = 0
+        # prolonged-silence notice (see SOL_SILENT_NOTICE_SECS). Armed whenever
+        # SOL starts, cleared by every byte received.
+        self._sol_last_rx_at        = None
+        self._sol_silent_noted      = False
 
         # --debug: periodic heartbeat proving (or disproving) that bytes are
         # actually arriving, so "screen is blank" can be told apart from
@@ -1055,6 +1063,8 @@ class LConsole:
             self.sol_backend_name = 'ipmi'
             self.sol = self._build_sol()
             self.sol.start(winsize=terminal_size())
+        # after the fallback, so the notice times whichever transport actually started
+        self._arm_silence_notice()
 
     # ── event handling ──
 
@@ -1093,6 +1103,7 @@ class LConsole:
         # arm the liveness probe: a reconnect that delivers nothing within
         # this window is treated as another dead payload, not a success
         self._sol_probe_deadline = time.monotonic() + SOL_EXPECT_OUTPUT_SECS
+        self._arm_silence_notice()
         self._message('SOL reconnected.')
 
     def _maybe_recover_sol(self):
@@ -1132,6 +1143,34 @@ class LConsole:
             return
         self.sol_gone_at = None
         self._restart_sol('SOL is down')
+
+    def _arm_silence_notice(self):
+        self._sol_last_rx_at   = time.monotonic()
+        self._sol_silent_noted = False
+
+    def _maybe_note_silence(self):
+        """Say, once, that nothing has arrived for a long time.
+
+        This deliberately does NOT reconnect. An idle console is legitimately
+        silent forever, which is why staleness is judged against operator input
+        rather than silence — reconnecting on silence would restart the session
+        under anyone sitting at a quiet login prompt. But the same silence is
+        also what a console looks like after another SOL session has taken the
+        payload: ipmitool stays alive, no error is printed, and nothing arrives
+        again until the operator happens to type. Measured on real hardware, a
+        passively watched console stays blank indefinitely and then recovers
+        within ~5s of the first keystroke. So the gap is not recovery, it is
+        that nobody is told there is anything to recover from."""
+        if self._sol_last_rx_at is None or self._sol_silent_noted:
+            return
+        if time.monotonic() - self._sol_last_rx_at < SOL_SILENT_NOTICE_SECS:
+            return
+        self._sol_silent_noted = True
+        self._message(
+            f'nothing received for {SOL_SILENT_NOTICE_SECS:.0f}s — the console may just '
+            'be idle, or another SOL session may have taken it over. Press Enter to '
+            're-check: no reply within '
+            f'{SOL_STALE_AFTER_INPUT:.0f}s reconnects automatically.')
 
     def _debug_heartbeat(self, sol_fd):
         """--debug: prove whether bytes are actually arriving. Tells apart a
@@ -1244,6 +1283,7 @@ class LConsole:
                         self._sol_reconnect_count     = 0  # proven healthy again
                         self._sol_probe_deadline      = None
                         self._silent_reconnects       = 0
+                        self._arm_silence_notice()
                         if self.debug:
                             self._sol_rx_total    += len(out)
                             self._sol_rx_interval += len(out)
@@ -1261,6 +1301,7 @@ class LConsole:
                 if self.debug:
                     self._debug_heartbeat(sol_fd)
 
+                self._maybe_note_silence()
                 self._maybe_recover_sol()
 
         except KeyboardInterrupt:
