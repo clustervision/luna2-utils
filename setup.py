@@ -92,7 +92,7 @@ setup(
     license = "MIT",
     keywords = [
         "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "lrack", "slurm",
-        "Trinity", "ClusterVision", "Sumit", "Sumit Sharma", "lconsole"
+        "Trinity", "ClusterVision", "lconsole"
     ],
     entry_points={
         'console_scripts': [
