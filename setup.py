@@ -92,7 +92,7 @@ setup(
     license = "MIT",
     keywords = [
         "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "lrack", "slurm",
-        "Trinity", "ClusterVision", "Sumit", "Sumit Sharma"
+        "Trinity", "ClusterVision", "lconsole"
     ],
     entry_points={
         'console_scripts': [
@@ -105,6 +105,7 @@ setup(
             'lslurm = utils.lslurm:main',
             'lnode = utils.lnode:main',
             'lrack = utils.lrack:main',
+            'lconsole = utils.lconsole:main',
             'trix-diag = utils.trinity_diagnosis:main'
         ]
     },
