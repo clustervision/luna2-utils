@@ -117,6 +117,10 @@ SOL_RECONNECT_JITTER_MAX = 5.0  # random 0..N-second delay before each reconnect
 # be reconnected out from under the operator indefinitely. Any received byte
 # resets the count and ends the probing.
 SOL_EXPECT_OUTPUT_SECS   = 10.0
+# Silence alone is never evidence of a fault (see the note in __init__), so this
+# only ever prints — it must not reconnect. It exists because the alternative is
+# a screen that has been dead for minutes and has said nothing about it.
+SOL_SILENT_NOTICE_SECS   = 60.0
 MAX_SILENT_RECONNECTS    = 12   # covers the observed ~10-cycle rocky transition
 # attempt, so a fleet-wide event (mass reboot, common BMC hiccup) doesn't turn
 # hundreds/thousands of concurrent lconsole sessions into a synchronized retry
@@ -209,6 +213,18 @@ def get_bmcsetup_config(name, conf):
     return bmcsetup
 
 
+def get_redfishsetup_config(name, conf):
+    """Tolerant: a 2.1 daemon has no redfishsetup endpoint, and a node without
+    one is normal — the Redfish backend then falls back to bmcsetup credentials."""
+    try:
+        data = call_api(conf, f'/config/redfishsetup/{name}')
+        return data.get('config', {}).get('redfishsetup', {}).get(name)
+    except Exception as exc:
+        logger.info('redfishsetup %s not resolvable (%s) — using bmcsetup credentials',
+                    name, exc)
+        return None
+
+
 def resolve_node_details(nodename, conf):
     node    = get_node_config(nodename, conf)
     boot_ip = None
@@ -228,10 +244,14 @@ def resolve_node_details(nodename, conf):
     group         = get_group_config(groupname, conf) if groupname else {}
     bmcsetup_name = node.get('bmcsetupname') or group.get('bmcsetupname')
     bmcsetup      = get_bmcsetup_config(bmcsetup_name, conf) if bmcsetup_name else None
+    redfishsetup_name = node.get('redfishsetup') or group.get('redfishsetup')
+    redfishsetup      = (get_redfishsetup_config(redfishsetup_name, conf)
+                         if redfishsetup_name else None)
     return {
         'node': node, 'group': group,
         'boot_ip': boot_ip, 'bmc_ip': bmc_ip,
         'bmcsetup_name': bmcsetup_name, 'bmcsetup': bmcsetup,
+        'redfishsetup_name': redfishsetup_name, 'redfishsetup': redfishsetup,
     }
 
 
@@ -766,17 +786,36 @@ class RedfishSolBackend(SolBackend):
         '/redfish/v1/Managers/iDRAC.Embedded.1',
     ]
 
-    def __init__(self, nodename, bmc_ip, bmcsetup, system_path=None):
+    def __init__(self, nodename, bmc_ip, bmcsetup, system_path=None,
+                 redfishsetup=None):
         super().__init__(nodename, bmc_ip, bmcsetup)
         self._system_path_override = system_path
         self._ssh_port = None
+        # Luna's redfishsetup is the account and endpoint provisioned FOR
+        # Redfish; prefer it wherever it is set, fall back to bmcsetup so a
+        # 2.1 daemon or an unconfigured node keeps working unchanged.
+        rf = redfishsetup or {}
+        account = next((a for a in rf.get('accounts') or []
+                        if a.get('username') and a.get('password')), None)
+        if account:
+            self._rf_user, self._rf_pass = account['username'], account['password']
+            self._cred_source = ("redfishsetup account "
+                                 + (account.get('name') or account['username']))
+        else:
+            self._rf_user, self._rf_pass = bmcsetup['username'], bmcsetup['password']
+            self._cred_source = 'bmcsetup credentials'
+        scheme = rf.get('scheme') or 'https'
+        port   = rf.get('port')
+        self._rf_base   = f"{scheme}://{bmc_ip}" + (f":{port}" if port else '')
+        self._rf_verify = bool(rf.get('verify'))
+        logger.info('Redfish endpoint %s for %s, using %s',
+                    self._rf_base, nodename, self._cred_source)
 
     def _redfish_get(self, path):
-        url  = f'https://{self.bmc_ip}{path}'
         resp = requests.get(
-            url,
-            auth=(self.bmcsetup['username'], self.bmcsetup['password']),
-            verify=False,
+            f'{self._rf_base}{path}',
+            auth=(self._rf_user, self._rf_pass),
+            verify=self._rf_verify,
             timeout=10,
         )
         resp.raise_for_status()
@@ -899,7 +938,7 @@ class RedfishSolBackend(SolBackend):
             'ssh',
             '-tt',                          # force PTY allocation
             '-p', str(self._ssh_port),
-            '-l', self.bmcsetup['username'],
+            '-l', self._rf_user,
             '-o', 'StrictHostKeyChecking=no',
             '-o', 'UserKnownHostsFile=/dev/null',
             '-o', 'LogLevel=ERROR',
@@ -910,7 +949,7 @@ class RedfishSolBackend(SolBackend):
             self.bmc_ip,
         ]
         if shutil.which('sshpass'):
-            cmd = ['sshpass', '-p', self.bmcsetup['password']] + cmd
+            cmd = ['sshpass', '-p', self._rf_pass] + cmd
         env = os.environ.copy()
         env['DISPLAY'] = ''   # suppress graphical password prompts
         return cmd, env
@@ -960,6 +999,10 @@ class LConsole:
         # post-reconnect liveness probe (see SOL_EXPECT_OUTPUT_SECS)
         self._sol_probe_deadline    = None
         self._silent_reconnects     = 0
+        # prolonged-silence notice (see SOL_SILENT_NOTICE_SECS). Armed whenever
+        # SOL starts, cleared by every byte received.
+        self._sol_last_rx_at        = None
+        self._sol_silent_noted      = False
 
         # --debug: periodic heartbeat proving (or disproving) that bytes are
         # actually arriving, so "screen is blank" can be told apart from
@@ -1005,7 +1048,8 @@ class LConsole:
             return IpmiSolBackend(self.nodename, bmc_ip, bmcsetup, cipher=self.cipher)
         if self.sol_backend_name == 'redfish':
             return RedfishSolBackend(self.nodename, bmc_ip, bmcsetup,
-                                     system_path=self.redfish_path)
+                                     system_path=self.redfish_path,
+                                     redfishsetup=self.details.get('redfishsetup'))
         raise RuntimeError(f'Unknown SOL backend: {self.sol_backend_name}')
 
     def start(self):
@@ -1019,6 +1063,8 @@ class LConsole:
             self.sol_backend_name = 'ipmi'
             self.sol = self._build_sol()
             self.sol.start(winsize=terminal_size())
+        # after the fallback, so the notice times whichever transport actually started
+        self._arm_silence_notice()
 
     # ── event handling ──
 
@@ -1057,6 +1103,7 @@ class LConsole:
         # arm the liveness probe: a reconnect that delivers nothing within
         # this window is treated as another dead payload, not a success
         self._sol_probe_deadline = time.monotonic() + SOL_EXPECT_OUTPUT_SECS
+        self._arm_silence_notice()
         self._message('SOL reconnected.')
 
     def _maybe_recover_sol(self):
@@ -1096,6 +1143,34 @@ class LConsole:
             return
         self.sol_gone_at = None
         self._restart_sol('SOL is down')
+
+    def _arm_silence_notice(self):
+        self._sol_last_rx_at   = time.monotonic()
+        self._sol_silent_noted = False
+
+    def _maybe_note_silence(self):
+        """Say, once, that nothing has arrived for a long time.
+
+        This deliberately does NOT reconnect. An idle console is legitimately
+        silent forever, which is why staleness is judged against operator input
+        rather than silence — reconnecting on silence would restart the session
+        under anyone sitting at a quiet login prompt. But the same silence is
+        also what a console looks like after another SOL session has taken the
+        payload: ipmitool stays alive, no error is printed, and nothing arrives
+        again until the operator happens to type. Measured on real hardware, a
+        passively watched console stays blank indefinitely and then recovers
+        within ~5s of the first keystroke. So the gap is not recovery, it is
+        that nobody is told there is anything to recover from."""
+        if self._sol_last_rx_at is None or self._sol_silent_noted:
+            return
+        if time.monotonic() - self._sol_last_rx_at < SOL_SILENT_NOTICE_SECS:
+            return
+        self._sol_silent_noted = True
+        self._message(
+            f'nothing received for {SOL_SILENT_NOTICE_SECS:.0f}s — the console may just '
+            'be idle, or another SOL session may have taken it over. Press Enter to '
+            're-check: no reply within '
+            f'{SOL_STALE_AFTER_INPUT:.0f}s reconnects automatically.')
 
     def _debug_heartbeat(self, sol_fd):
         """--debug: prove whether bytes are actually arriving. Tells apart a
@@ -1208,6 +1283,7 @@ class LConsole:
                         self._sol_reconnect_count     = 0  # proven healthy again
                         self._sol_probe_deadline      = None
                         self._silent_reconnects       = 0
+                        self._arm_silence_notice()
                         if self.debug:
                             self._sol_rx_total    += len(out)
                             self._sol_rx_interval += len(out)
@@ -1225,6 +1301,7 @@ class LConsole:
                 if self.debug:
                     self._debug_heartbeat(sol_fd)
 
+                self._maybe_note_silence()
                 self._maybe_recover_sol()
 
         except KeyboardInterrupt:
