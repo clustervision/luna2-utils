@@ -32,14 +32,18 @@ __email__       = 'diego.sonaglia@clustervision.com'
 __status__      = 'Development'
 
 
-import re
 import sys
-import json
-import argparse
-from configparser import ConfigParser
+try:
+    import re
+    import json
+    import argparse
+    from configparser import ConfigParser
 
-import jwt
-import requests
+    import jwt
+    import requests
+except KeyboardInterrupt:
+    sys.stderr.write("\nKeyboard Interrupted.\n")
+    sys.exit(130)
 
 
 TOKEN = None
@@ -176,6 +180,17 @@ class CLI():
 
 
 def main():
+    """
+    Entry point; Ctrl-C ends the run with a message instead of a traceback.
+    """
+    try:
+        _main()
+    except KeyboardInterrupt:
+        sys.stderr.write("\nKeyboard Interrupted.\n")
+        sys.exit(130)
+
+
+def _main():
     """
     The Main method to initiate the script.
     """
