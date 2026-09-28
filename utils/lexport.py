@@ -32,23 +32,27 @@ __status__      = 'Development'
 
 #VERSION: 0.1.1
 
-import os
-import getpass
 import sys
-from builtins import dict
-import re
-import json
-from time import sleep, time
-import subprocess
-import shutil
-import requests
-from requests import Session
-from requests.adapters import HTTPAdapter
-import urllib3
-from urllib3.util import Retry
-from utils.utils.log import Log
-from utils.utils.ini import Ini
-from utils.utils.token import Token
+try:
+    import os
+    import getpass
+    from builtins import dict
+    import re
+    import json
+    from time import sleep, time
+    import subprocess
+    import shutil
+    import requests
+    from requests import Session
+    from requests.adapters import HTTPAdapter
+    import urllib3
+    from urllib3.util import Retry
+    from utils.utils.log import Log
+    from utils.utils.ini import Ini
+    from utils.utils.token import Token
+except KeyboardInterrupt:
+    sys.stderr.write("\nKeyboard Interrupted.\n")
+    sys.exit(130)
 
 global TMP_DIR
 TMP_DIR='/tmp'
@@ -69,6 +73,17 @@ CONF = Ini.read_ini(ini_file='/trinity/local/luna/utils/config/luna.ini')
 # ============================================================================
 
 def main(argv):
+    """
+    Entry point; Ctrl-C ends the run with a message instead of a traceback.
+    """
+    try:
+        _main(argv)
+    except KeyboardInterrupt:
+        sys.stderr.write("\nKeyboard Interrupted.\n")
+        sys.exit(130)
+
+
+def _main(argv):
     """
     The main method to initiate the script.
     """
