@@ -65,28 +65,32 @@ __maintainer__  = 'Dev-team'
 __email__       = 'support@clustervision.com'
 __status__      = 'Development'
 
-import argparse
-import base64
-import fcntl
-import getpass
-import logging
-import os
-import random
-import re
-import select
-import signal
-import socket
-import struct
-import subprocess
 import sys
-import time
-import tty
-import termios
-import shutil
-import requests
+try:
+    import argparse
+    import base64
+    import fcntl
+    import getpass
+    import logging
+    import os
+    import random
+    import re
+    import select
+    import signal
+    import socket
+    import struct
+    import subprocess
+    import time
+    import tty
+    import termios
+    import shutil
+    import requests
 
-from utils.utils.ini import Ini
-from utils.utils.token import Token
+    from utils.utils.ini import Ini
+    from utils.utils.token import Token
+except KeyboardInterrupt:
+    sys.stderr.write('\nKeyboard Interrupted.\n')
+    sys.exit(130)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1378,6 +1382,15 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """Entry point; Ctrl-C ends the run with a message instead of a traceback."""
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:
+        sys.stderr.write('\nKeyboard Interrupted.\n')
+        return 130
+
+
+def _main(argv=None):
     args = parse_args(argv)
     logger.info('User %s ran => lconsole %s', getpass.getuser(), ' '.join(sys.argv[1:]))
 
@@ -1422,6 +1435,11 @@ def main(argv=None):
     )
     try:
         app.start()
+    except KeyboardInterrupt:
+        # a half-started SOL child must not outlive us
+        if app.sol is not None:
+            app.sol.stop()
+        raise
     except Exception as exc:
         logger.exception('starting console for %s failed', args.nodename)
         print(f'lconsole: {exc}', file=sys.stderr)
