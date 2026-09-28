@@ -29,23 +29,27 @@ __status__      = 'Development'
 
 #VERSION: 0.3.1
 
-import os
-import getpass
 import sys
-from builtins import dict
-import re
-import json
-from time import sleep
-from configparser import RawConfigParser
-import requests
-from requests import Session
-from requests.adapters import HTTPAdapter
-import urllib3
-from urllib3.util import Retry
+try:
+    import os
+    import getpass
+    from builtins import dict
+    import re
+    import json
+    from time import sleep
+    from configparser import RawConfigParser
+    import requests
+    from requests import Session
+    from requests.adapters import HTTPAdapter
+    import urllib3
+    from urllib3.util import Retry
 
-from utils.utils.log import Log
-from utils.utils.ini import Ini
-from utils.utils.token import Token
+    from utils.utils.log import Log
+    from utils.utils.ini import Ini
+    from utils.utils.token import Token
+except KeyboardInterrupt:
+    sys.stderr.write("\nKeyboard Interrupted.\n")
+    sys.exit(130)
 
 try:
     from trinityx_config_slurm.utils.hostlist import compress, expand
@@ -69,10 +73,23 @@ session.mount('https://', HTTPAdapter(max_retries=retries))
 
 # ============================================================================
 
-def main(argv):
+def main(argv=None):
+    """
+    Entry point; Ctrl-C ends the run with a message instead of a traceback.
+    """
+    try:
+        _main(argv)
+    except KeyboardInterrupt:
+        _print("\nKeyboard Interrupted.")
+        sys.exit(130)
+
+
+def _main(argv=None):
     """
     The main method to initiate the script.
     """
+    if argv is None:
+        argv = sys.argv[1:]
     command = sys.argv
     command[0] = 'lpower'
     command = ' '.join(command)
@@ -421,4 +438,5 @@ def _print(message=None):
         print(message)
 
 # hidden at the bottom; the call for the main function...
-main(sys.argv[1:])
+if __name__ == '__main__':
+    main()
