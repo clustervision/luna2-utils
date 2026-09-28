@@ -34,28 +34,32 @@ __status__      = 'Development'
 
 #VERSION: 0.1.0
 
-import os
 import sys
-import json
-import shutil
-import logging
-import getpass
-import argparse
+try:
+    import os
+    import json
+    import shutil
+    import logging
+    import getpass
+    import argparse
 
-import requests
-from requests import Session
-from requests.adapters import HTTPAdapter
-import urllib3
-from urllib3.util import Retry
-import hostlist
-from prettytable import PrettyTable
-from termcolor import colored
+    import requests
+    from requests import Session
+    from requests.adapters import HTTPAdapter
+    import urllib3
+    from urllib3.util import Retry
+    import hostlist
+    from prettytable import PrettyTable
+    from termcolor import colored
 
-import argcomplete
+    import argcomplete
 
-from utils.utils.log import Log
-from utils.utils.ini import Ini
-from utils.utils.token import Token
+    from utils.utils.log import Log
+    from utils.utils.ini import Ini
+    from utils.utils.token import Token
+except KeyboardInterrupt:
+    sys.stderr.write("\nKeyboard Interrupted.\n")
+    sys.exit(130)
 
 INI_FILE = os.environ.get('LRACK_INI', '/trinity/local/luna/utils/config/luna.ini')
 LOG_FILE = '/var/log/luna/lrack.log'
@@ -919,7 +923,16 @@ def _init_logger(verbose):
 
 
 def main():
-    """Entry point: parse arguments and dispatch to the matching handler."""
+    """Entry point; Ctrl-C ends the run with a message instead of a traceback."""
+    try:
+        _main()
+    except KeyboardInterrupt:
+        sys.stderr.write("\nKeyboard Interrupted.\n")
+        sys.exit(130)
+
+
+def _main():
+    """Parse arguments and dispatch to the matching handler."""
     parser = get_parser()
     argcomplete.autocomplete(parser, always_complete_options=False)
     args = parser.parse_args(rewrite_easy(sys.argv[1:]))
