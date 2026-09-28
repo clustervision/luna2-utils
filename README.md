@@ -32,7 +32,7 @@ images, node consoles, power, racks and cluster health.
 | `lcluster` | Health and status of the cluster nodes: power, Luna install state and Slurm |
 | `lnode` | List or clear the BMC system event log of nodes |
 | `bootutil` | List, read or set the boot order of a node over Redfish |
-| `trix-diag` | Status of the TrinityX services and modules |
+| `trinity_diagnosis` | Status of the TrinityX services and modules (`trix-diag` when installed with pip) |
 | `lmaster` | Show which controller is the HA master, the HA state of all controllers, or make the controller in `luna.ini` master |
 | `lexport` | Export and import the cluster configuration or an OS image |
 | `lsosreport` | Collect logs, system and cluster information into one archive for support |
@@ -88,7 +88,7 @@ This project is a part of luna project. Luna2 Utils have all kind of necessary u
 5. lnode <br />
 6. lrack <br />
 7. lconsole <br />
-8. trix-diag <br />
+8. trinity_diagnosis <br />
 
 After installing the Luna 2 Utils via pip, all those commands will be available for further use.<br />
 
