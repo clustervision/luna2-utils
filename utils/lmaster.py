@@ -14,15 +14,19 @@ __email__       = 'antoine.schonewille@clustervision.com'
 __status__      = 'Development'
 
 import sys
-from builtins import dict
-import requests
-import re
-import json
-from time import sleep
+try:
+    from builtins import dict
+    import requests
+    import re
+    import json
+    from time import sleep
 
-from utils.utils.log import Log
-from utils.utils.ini import Ini
-from utils.utils.token import Token
+    from utils.utils.log import Log
+    from utils.utils.ini import Ini
+    from utils.utils.token import Token
+except KeyboardInterrupt:
+    sys.stderr.write("\nKeyboard Interrupted.\n")
+    sys.exit(130)
 
 logger = Log.init_log(log_file='/var/log/luna/lmaster.log',log_level='info')
 CONF = Ini.read_ini(ini_file='/trinity/local/luna/utils/config/luna.ini')
@@ -32,6 +36,17 @@ requests.packages.urllib3.disable_warnings()
 # ============================================================================
 
 def main(argv):
+    """
+    Entry point; Ctrl-C ends the run with a message instead of a traceback.
+    """
+    try:
+        _main(argv)
+    except KeyboardInterrupt:
+        sys.stderr.write("\nKeyboard Interrupted.\n")
+        sys.exit(130)
+
+
+def _main(argv):
     ACTION="who"
     for i in range(0, len(argv)):
         if (argv[i] == "-h" or argv[i] == "--help"):
