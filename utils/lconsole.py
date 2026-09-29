@@ -65,32 +65,29 @@ __maintainer__  = 'Dev-team'
 __email__       = 'support@clustervision.com'
 __status__      = 'Development'
 
+import argparse
+import base64
+import fcntl
+import getpass
+import logging
+import os
+import random
+import re
+import select
+import signal
+import socket
+import struct
+import subprocess
 import sys
-try:
-    import argparse
-    import base64
-    import fcntl
-    import getpass
-    import logging
-    import os
-    import random
-    import re
-    import select
-    import signal
-    import socket
-    import struct
-    import subprocess
-    import time
-    import tty
-    import termios
-    import shutil
-    import requests
+import time
+import tty
+import termios
+import shutil
+import requests
 
-    from utils.utils.ini import Ini
-    from utils.utils.token import Token
-except KeyboardInterrupt:
-    sys.stderr.write('\nKeyboard Interrupted.\n')
-    sys.exit(130)
+from utils.utils.ini import Ini
+from utils.utils.token import Token
+from utils.utils.interrupt import exit_on_interrupt
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1383,11 +1380,7 @@ def parse_args(argv=None):
 
 def main(argv=None):
     """Entry point; Ctrl-C ends the run with a message instead of a traceback."""
-    try:
-        return _main(argv)
-    except KeyboardInterrupt:
-        sys.stderr.write('\nKeyboard Interrupted.\n')
-        return 130
+    return exit_on_interrupt(_main, argv)
 
 
 def _main(argv=None):

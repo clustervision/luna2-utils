@@ -29,27 +29,24 @@ __status__      = 'Development'
 
 #VERSION: 0.3.1
 
+import os
+import getpass
 import sys
-try:
-    import os
-    import getpass
-    from builtins import dict
-    import re
-    import json
-    from time import sleep
-    from configparser import RawConfigParser
-    import requests
-    from requests import Session
-    from requests.adapters import HTTPAdapter
-    import urllib3
-    from urllib3.util import Retry
+from builtins import dict
+import re
+import json
+from time import sleep
+from configparser import RawConfigParser
+import requests
+from requests import Session
+from requests.adapters import HTTPAdapter
+import urllib3
+from urllib3.util import Retry
 
-    from utils.utils.log import Log
-    from utils.utils.ini import Ini
-    from utils.utils.token import Token
-except KeyboardInterrupt:
-    sys.stderr.write("\nKeyboard Interrupted.\n")
-    sys.exit(130)
+from utils.utils.log import Log
+from utils.utils.ini import Ini
+from utils.utils.token import Token
+from utils.utils.interrupt import exit_on_interrupt
 
 try:
     from trinityx_config_slurm.utils.hostlist import compress, expand
@@ -77,11 +74,7 @@ def main(argv=None):
     """
     Entry point; Ctrl-C ends the run with a message instead of a traceback.
     """
-    try:
-        _main(argv)
-    except KeyboardInterrupt:
-        _print("\nKeyboard Interrupted.")
-        sys.exit(130)
+    return exit_on_interrupt(_main, argv)
 
 
 def _main(argv=None):

@@ -18,15 +18,12 @@
 
 
 import sys
-try:
-    import os
-    import base64
-    import json
-    import requests
-    import urllib3
-except KeyboardInterrupt:
-    sys.stderr.write("\nKeyboard Interrupted.\n")
-    sys.exit(130)
+import os
+import base64
+import json
+import requests
+import urllib3
+from utils.utils.interrupt import exit_on_interrupt
 
 urllib3.disable_warnings()
 
@@ -243,11 +240,7 @@ def main():
     """
     Entry point; Ctrl-C ends the run with a message instead of a traceback.
     """
-    try:
-        _main()
-    except KeyboardInterrupt:
-        sys.stderr.write("\nKeyboard Interrupted.\n")
-        sys.exit(130)
+    return exit_on_interrupt(_main)
 
 
 if __name__ == "__main__":

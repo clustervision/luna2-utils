@@ -32,27 +32,24 @@ __status__      = 'Development'
 
 #VERSION: 0.1.1
 
+import os
+import getpass
 import sys
-try:
-    import os
-    import getpass
-    from builtins import dict
-    import re
-    import json
-    from time import sleep, time
-    import subprocess
-    import shutil
-    import requests
-    from requests import Session
-    from requests.adapters import HTTPAdapter
-    import urllib3
-    from urllib3.util import Retry
-    from utils.utils.log import Log
-    from utils.utils.ini import Ini
-    from utils.utils.token import Token
-except KeyboardInterrupt:
-    sys.stderr.write("\nKeyboard Interrupted.\n")
-    sys.exit(130)
+from builtins import dict
+import re
+import json
+from time import sleep, time
+import subprocess
+import shutil
+import requests
+from requests import Session
+from requests.adapters import HTTPAdapter
+import urllib3
+from urllib3.util import Retry
+from utils.utils.log import Log
+from utils.utils.ini import Ini
+from utils.utils.token import Token
+from utils.utils.interrupt import exit_on_interrupt
 
 global TMP_DIR
 TMP_DIR='/tmp'
@@ -76,11 +73,7 @@ def main(argv):
     """
     Entry point; Ctrl-C ends the run with a message instead of a traceback.
     """
-    try:
-        _main(argv)
-    except KeyboardInterrupt:
-        sys.stderr.write("\nKeyboard Interrupted.\n")
-        sys.exit(130)
+    return exit_on_interrupt(_main, argv)
 
 
 def _main(argv):

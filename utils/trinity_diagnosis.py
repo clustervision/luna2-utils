@@ -31,15 +31,12 @@ __email__       = "sumit.sharma@clustervision.com"
 __status__      = "Development"
 
 
+import os
 import sys
-try:
-    import os
-    import platform
-    import subprocess
-    from termcolor import colored
-except KeyboardInterrupt:
-    sys.stderr.write("\nKeyboard Interrupted.\n")
-    sys.exit(130)
+import platform
+import subprocess
+from termcolor import colored
+from utils.utils.interrupt import exit_on_interrupt
 
 
 class Diagnosis():
@@ -133,11 +130,7 @@ def main():
     """
     Entry point; Ctrl-C ends the run with a message instead of a traceback.
     """
-    try:
-        _main()
-    except KeyboardInterrupt:
-        sys.stderr.write("\nKeyboard Interrupted.\n")
-        sys.exit(130)
+    return exit_on_interrupt(_main)
 
 
 def _main():
