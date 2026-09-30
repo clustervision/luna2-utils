@@ -36,6 +36,7 @@ import sys
 import platform
 import subprocess
 from termcolor import colored
+from utils.utils.interrupt import exit_on_interrupt
 
 
 class Diagnosis():
@@ -126,6 +127,13 @@ class Diagnosis():
 
 
 def main():
+    """
+    Entry point; Ctrl-C ends the run with a message instead of a traceback.
+    """
+    return exit_on_interrupt(_main)
+
+
+def _main():
     """
     This main method will initiate the script for pip installation.
     """

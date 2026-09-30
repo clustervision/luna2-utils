@@ -23,6 +23,7 @@ from time import sleep
 from utils.utils.log import Log
 from utils.utils.ini import Ini
 from utils.utils.token import Token
+from utils.utils.interrupt import exit_on_interrupt
 
 logger = Log.init_log(log_file='/var/log/luna/lmaster.log',log_level='info')
 CONF = Ini.read_ini(ini_file='/trinity/local/luna/utils/config/luna.ini')
@@ -32,6 +33,13 @@ requests.packages.urllib3.disable_warnings()
 # ============================================================================
 
 def main(argv):
+    """
+    Entry point; Ctrl-C ends the run with a message instead of a traceback.
+    """
+    return exit_on_interrupt(_main, argv)
+
+
+def _main(argv):
     ACTION="who"
     for i in range(0, len(argv)):
         if (argv[i] == "-h" or argv[i] == "--help"):

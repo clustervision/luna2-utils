@@ -56,6 +56,7 @@ import argcomplete
 from utils.utils.log import Log
 from utils.utils.ini import Ini
 from utils.utils.token import Token
+from utils.utils.interrupt import exit_on_interrupt
 
 INI_FILE = os.environ.get('LRACK_INI', '/trinity/local/luna/utils/config/luna.ini')
 LOG_FILE = '/var/log/luna/lrack.log'
@@ -919,7 +920,12 @@ def _init_logger(verbose):
 
 
 def main():
-    """Entry point: parse arguments and dispatch to the matching handler."""
+    """Entry point; Ctrl-C ends the run with a message instead of a traceback."""
+    return exit_on_interrupt(_main)
+
+
+def _main():
+    """Parse arguments and dispatch to the matching handler."""
     parser = get_parser()
     argcomplete.autocomplete(parser, always_complete_options=False)
     args = parser.parse_args(rewrite_easy(sys.argv[1:]))

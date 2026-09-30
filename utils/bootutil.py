@@ -23,6 +23,7 @@ import base64
 import json
 import requests
 import urllib3
+from utils.utils.interrupt import exit_on_interrupt
 
 urllib3.disable_warnings()
 
@@ -124,107 +125,123 @@ def set_bootorder(system, etag, bootorder):
     return result
 
 
-MODE = ''
-DISPLAY_HELP = False
-DESIRED_BOOTORDER = ''
+def _main():
+    """
+    Parse the command line and perform the requested task.
+    """
+    global HTTP_USER, HTTP_PASSWORD, HOST
+    MODE = ''
+    DISPLAY_HELP = False
+    DESIRED_BOOTORDER = ''
 
-if len(sys.argv) > 1:
-    STATE = 'option'
-    for i in range(1, len(sys.argv)):
-        arg = sys.argv[i]
-        if STATE == 'option':
-            if arg in ['-U', '--user']:
-                STATE = 'user'
-            elif arg in ['-P', '--password']:
-                STATE = 'password'
-            elif arg in ['-H', '--host']:
-                STATE = 'host'
-            elif arg == 'list':
-                MODE = 'list'
-            elif arg == 'get':
-                MODE = 'get'
-            elif arg == 'set':
-                MODE = 'set'
-                STATE = 'set'
-        elif STATE == 'user':
-            HTTP_USER = arg
-            STATE = 'option'
-        elif STATE == 'password':
-            HTTP_PASSWORD = arg
-            STATE = 'option'
-        elif STATE == 'host':
-            HOST = arg
-            STATE = 'option'
-        elif STATE == 'set':
-            DESIRED_BOOTORDER = arg.split()
-            STATE = 'option'
-else:
-    DISPLAY_HELP = True
-
-if not sys.argv[1:] or MODE == "":
-    print("Please specify a mode on the command line.", file=sys.stderr)
-    DISPLAY_HELP = True
-if not HOST:
-    print("Please specify a host on the command line.", file=sys.stderr)
-    DISPLAY_HELP = True
-if not HTTP_USER:
-    print("Please specify an HTTP user on the command line.", file=sys.stderr)
-    DISPLAY_HELP = True
-if not HTTP_PASSWORD:
-    print("Please specify an HTTP password on the command line.", file=sys.stderr)
-    DISPLAY_HELP = True
-if DISPLAY_HELP:
-    print("\nUsage: bootutil [options...] <mode>\n", file=sys.stderr)
-    print("<mode> can be either:", file=sys.stderr)
-    print("  list         -- list available boot options", file=sys.stderr)
-    print("  get          -- get current boot order", file=sys.stderr)
-    print("  set <order>  -- set current boot order\n", file=sys.stderr)
-    print("Available [options...]:", file=sys.stderr)
-    print(" -H, --host      -- Redfish host. Must include protocol, e.g. https://host",
-          file=sys.stderr)
-    print(" -U, --user      -- HTTP user name", file=sys.stderr)
-    print(" -P, --password  -- HTTP user password", file=sys.stderr)
-    sys.exit(1)
-
-#Perform the requested task
-#Parse system and boot option URLs based on host
-
-sy_urls = get_system_urls(HOST)
-if len(sy_urls) != 1:
-    print(f"Expected exactly one system on {HOST}, found {len(sy_urls)}.", file=sys.stderr)
-    sys.exit(1)
-system = os.path.basename(sy_urls[0])
-bo_urls = get_bootoption_urls(HOST, system)
-
-if MODE == "list":
-    print("Available boot devices:")
-    print("")
-    print("ID    |Name            |Desc")
-    print("------+----------------+------------------------------------------------------")
-
-bootoption = {}
-for bo_url in bo_urls:
-    id, name, desc = get_boot_option_id_name_desc(bo_url)
-    bootoption[id] = desc
-    if MODE == "list":
-        print(f"{id:<6}|{name:<16}|{desc:<58}")
-
-#Retrieve and output the current boot order
-
-if MODE == "get":
-    print("Current boot order:")
-    bootorder = get_bootorder(system)
-    i = 1
-    for bo in bootorder:
-        print(f"{i} - {bo} {bootoption.get(bo, '')}")
-        i += 1
-
-#Set the boot order
-
-if MODE == "set":
-    etag = get_system_etag(system)
-    encode, code = set_bootorder(system, etag, DESIRED_BOOTORDER)
-    if encode>=200 and encode<300:
-        print(f'Set boot order to "{DESIRED_BOOTORDER}" successful! (HTTP-result: {code})')
+    if len(sys.argv) > 1:
+        STATE = 'option'
+        for i in range(1, len(sys.argv)):
+            arg = sys.argv[i]
+            if STATE == 'option':
+                if arg in ['-U', '--user']:
+                    STATE = 'user'
+                elif arg in ['-P', '--password']:
+                    STATE = 'password'
+                elif arg in ['-H', '--host']:
+                    STATE = 'host'
+                elif arg == 'list':
+                    MODE = 'list'
+                elif arg == 'get':
+                    MODE = 'get'
+                elif arg == 'set':
+                    MODE = 'set'
+                    STATE = 'set'
+            elif STATE == 'user':
+                HTTP_USER = arg
+                STATE = 'option'
+            elif STATE == 'password':
+                HTTP_PASSWORD = arg
+                STATE = 'option'
+            elif STATE == 'host':
+                HOST = arg
+                STATE = 'option'
+            elif STATE == 'set':
+                DESIRED_BOOTORDER = arg.split()
+                STATE = 'option'
     else:
-        print(f'Set boot order to "{DESIRED_BOOTORDER}" failed! (HTTP-result: {code})')
+        DISPLAY_HELP = True
+
+    if not sys.argv[1:] or MODE == "":
+        print("Please specify a mode on the command line.", file=sys.stderr)
+        DISPLAY_HELP = True
+    if not HOST:
+        print("Please specify a host on the command line.", file=sys.stderr)
+        DISPLAY_HELP = True
+    if not HTTP_USER:
+        print("Please specify an HTTP user on the command line.", file=sys.stderr)
+        DISPLAY_HELP = True
+    if not HTTP_PASSWORD:
+        print("Please specify an HTTP password on the command line.", file=sys.stderr)
+        DISPLAY_HELP = True
+    if DISPLAY_HELP:
+        print("\nUsage: bootutil [options...] <mode>\n", file=sys.stderr)
+        print("<mode> can be either:", file=sys.stderr)
+        print("  list         -- list available boot options", file=sys.stderr)
+        print("  get          -- get current boot order", file=sys.stderr)
+        print("  set <order>  -- set current boot order\n", file=sys.stderr)
+        print("Available [options...]:", file=sys.stderr)
+        print(" -H, --host      -- Redfish host. Must include protocol, e.g. https://host",
+              file=sys.stderr)
+        print(" -U, --user      -- HTTP user name", file=sys.stderr)
+        print(" -P, --password  -- HTTP user password", file=sys.stderr)
+        sys.exit(1)
+
+    #Perform the requested task
+    #Parse system and boot option URLs based on host
+
+    sy_urls = get_system_urls(HOST)
+    if len(sy_urls) != 1:
+        print(f"Expected exactly one system on {HOST}, found {len(sy_urls)}.", file=sys.stderr)
+        sys.exit(1)
+    system = os.path.basename(sy_urls[0])
+    bo_urls = get_bootoption_urls(HOST, system)
+
+    if MODE == "list":
+        print("Available boot devices:")
+        print("")
+        print("ID    |Name            |Desc")
+        print("------+----------------+------------------------------------------------------")
+
+    bootoption = {}
+    for bo_url in bo_urls:
+        id, name, desc = get_boot_option_id_name_desc(bo_url)
+        bootoption[id] = desc
+        if MODE == "list":
+            print(f"{id:<6}|{name:<16}|{desc:<58}")
+
+    #Retrieve and output the current boot order
+
+    if MODE == "get":
+        print("Current boot order:")
+        bootorder = get_bootorder(system)
+        i = 1
+        for bo in bootorder:
+            print(f"{i} - {bo} {bootoption.get(bo, '')}")
+            i += 1
+
+    #Set the boot order
+
+    if MODE == "set":
+        etag = get_system_etag(system)
+        encode, code = set_bootorder(system, etag, DESIRED_BOOTORDER)
+        if encode>=200 and encode<300:
+            print(f'Set boot order to "{DESIRED_BOOTORDER}" successful! (HTTP-result: {code})')
+        else:
+            print(f'Set boot order to "{DESIRED_BOOTORDER}" failed! (HTTP-result: {code})')
+
+
+def main():
+    """
+    Entry point; Ctrl-C ends the run with a message instead of a traceback.
+    """
+    return exit_on_interrupt(_main)
+
+
+if __name__ == "__main__":
+    main()

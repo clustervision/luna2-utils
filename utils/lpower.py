@@ -46,6 +46,7 @@ from urllib3.util import Retry
 from utils.utils.log import Log
 from utils.utils.ini import Ini
 from utils.utils.token import Token
+from utils.utils.interrupt import exit_on_interrupt
 
 try:
     from trinityx_config_slurm.utils.hostlist import compress, expand
@@ -69,10 +70,19 @@ session.mount('https://', HTTPAdapter(max_retries=retries))
 
 # ============================================================================
 
-def main(argv):
+def main(argv=None):
+    """
+    Entry point; Ctrl-C ends the run with a message instead of a traceback.
+    """
+    return exit_on_interrupt(_main, argv)
+
+
+def _main(argv=None):
     """
     The main method to initiate the script.
     """
+    if argv is None:
+        argv = sys.argv[1:]
     command = sys.argv
     command[0] = 'lpower'
     command = ' '.join(command)
@@ -421,4 +431,5 @@ def _print(message=None):
         print(message)
 
 # hidden at the bottom; the call for the main function...
-main(sys.argv[1:])
+if __name__ == '__main__':
+    main()
