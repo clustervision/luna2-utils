@@ -521,6 +521,9 @@ def stage_fetch(rest, out, kind, names, route, prefix):
 def stage_secrets(rest, out, node):
     """Secrets of the node, masked unless asked otherwise."""
     response = rest.get(f'config/secrets/node/{node}')
+    if response.status_code == 404:
+        out.section('Secrets', f'no secrets for {node}', note='empty')
+        return
     out.section(f'Secrets /config/secrets/node/{node}',
                 api_body(response, out.show_secrets, keys=('content', 'password')),
                 response.status_code, note=None if out.show_secrets else 'masked', filename='80-secrets.json')

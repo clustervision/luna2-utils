@@ -273,6 +273,16 @@ def test_leaves_walk_dicts_and_lists():
                                    (("profile", "p", "files", "0", "content"), "x")]
 
 
+def test_node_without_secrets_is_not_a_failure(tmp_path, capsys):
+    out = output(tmp_path)
+    ldebug.stage_secrets(FakeRest({}), out, "node001")
+    assert not out.failed and "no secrets for node001" in capsys.readouterr().out
+    secrets = {"config": {"secrets": {"group": {"g": [{"name": "k", "content": "abc", "path": "/p"}]}}}}
+    ldebug.stage_secrets(FakeRest({"config/secrets/node/node001": (200, json.dumps(secrets))}), out, "node001")
+    printed = capsys.readouterr().out
+    assert "***len=3" in printed and "abc" not in printed
+
+
 def test_parser_builds_without_a_daemon():
     args = ldebug.get_parser().parse_args(["--dump", "boot", "node001", "--stage", "menu,status"])
     assert args.area == "boot" and args.stage == "menu,status" and args.dump
