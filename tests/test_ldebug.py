@@ -89,6 +89,19 @@ def test_known_boot_nic_replaces_the_dracut_variable():
     assert "${LUNA_BOOTIF}" not in bootif["content"] + vlan["content"]
 
 
+def test_vlan_on_a_bond_with_slaves_resolves_every_block():
+    render = (FIXTURES / "change_net_bond.sh").read_text()
+    blocks = {iface["name"]: iface for iface in ldebug.parse_interfaces(render)}
+    assert set(blocks) == {"BOOTIF", "eth0.1", "eth1", "eth2", "bond0"}
+    assert "mode=802.3ad" in blocks["bond0"]["content"] and "interface-name=bond0" in blocks["bond0"]["content"]
+    for slave in ("eth1", "eth2"):
+        assert "master=bond0" in blocks[slave]["content"] and f"interface-name={slave}" in blocks[slave]["content"]
+    assert blocks["eth0.1"]["variables"]["parent_name"] == "bond0" and "parent=bond0" in blocks["eth0.1"]["content"]
+    assert blocks["BOOTIF"]["variables"]["interface_name"] == "${LUNA_BOOTIF}"
+    for iface in blocks.values():
+        assert "${interface_name}" not in iface["content"] and "${parent_name}" not in iface["content"]
+
+
 def test_rootmnt_resolves_from_the_render():
     render = ('    export rootmnt="/sysroot"\nfunction change_net {\n    interface_name=eth0\n    parent_name=\n'
               '    ######### eth0 #########\n      cat << LUNAEOF > "/lunatmp/interface_${interface_name}.conf"\n'
