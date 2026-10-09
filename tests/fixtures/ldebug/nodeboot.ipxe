@@ -1,0 +1,7 @@
+#!ipxe
+
+imgfetch -n kernel http://10.141.255.254:7051/files/compute-1784808751-vmlinuz-4.18.0-425.3.1.el8.x86_64
+imgload kernel
+imgargs kernel root=luna luna.mac=00:11:22:33:44:55 luna.ip=10.141.0.11/16 luna.gw=10.141.255.254 luna.url=http://10.141.255.254:7050 luna.verifycert=no luna.node=node001 luna.hostname=node001 luna.loghost=10.141.255.254 luna.service=0 net.ifnames=0 biosdevname=0 initrd=initrd.img boot=ramdisk
+imgfetch --name initrd.img http://10.141.255.254:7051/files/compute-1784808751-initramfs-4.18.0-425.3.1.el8.x86_64
+imgexec kernel
