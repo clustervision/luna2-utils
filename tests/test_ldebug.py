@@ -207,6 +207,20 @@ def test_sections_print_indented_and_dump_as_files(tmp_path, capsys):
     assert (run / "30-network" / "BOOTIF" / "Connection_BOOTIF.nmconnection").read_text() == "[connection]\n"
 
 
+def test_two_dumps_in_one_second_get_their_own_directories(tmp_path, monkeypatch):
+    class FrozenClock:
+        @staticmethod
+        def now():
+            return ldebug.datetime(2026, 10, 12, 18, 46, 10)
+
+    monkeypatch.setattr(ldebug, "datetime", FrozenClock)
+    first = output(tmp_path, dump=True)
+    second = output(tmp_path, dump=True)
+    assert first.directory.endswith("/node001/20261012-184610")
+    assert second.directory == first.directory + "-1"
+    assert os.path.isdir(second.directory)
+
+
 def test_failed_status_is_remembered(tmp_path, capsys):
     out = output(tmp_path)
     out.section("x", "", 200)

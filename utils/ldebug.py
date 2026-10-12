@@ -339,13 +339,19 @@ class Output():
             self.directory = self._prepare(args.dump_dir, args.subdir)
 
     def _prepare(self, base, subdir):
-        directory = os.path.join(base, subdir, datetime.now().strftime('%Y%m%d-%H%M%S'))
+        stamp = os.path.join(base, subdir, datetime.now().strftime('%Y%m%d-%H%M%S'))
         try:
             os.makedirs(base, mode=0o700, exist_ok=True)
-            os.makedirs(directory, mode=0o700)
+            for attempt in range(100):
+                directory = stamp if attempt == 0 else f'{stamp}-{attempt}'
+                try:
+                    os.makedirs(directory, mode=0o700)
+                    return directory
+                except FileExistsError:
+                    continue
         except PermissionError:
             error_exit(f'cannot write to {base}; pick another directory with -d')
-        return directory
+        error_exit(f'too many dumps of this second under {os.path.dirname(stamp)}')
 
     def section(self, title, body, status=None, note=None, filename=None, display=None):
         """Print one section; status 2xx is green, anything else red and remembered.
