@@ -208,10 +208,12 @@ def test_sections_print_indented_and_dump_as_files(tmp_path, capsys):
 
 
 def test_two_dumps_in_one_second_get_their_own_directories(tmp_path, monkeypatch):
+    frozen = ldebug.datetime(2026, 10, 12, 18, 46, 10)
+
     class FrozenClock:
         @staticmethod
         def now():
-            return ldebug.datetime(2026, 10, 12, 18, 46, 10)
+            return frozen
 
     monkeypatch.setattr(ldebug, "datetime", FrozenClock)
     first = output(tmp_path, dump=True)
