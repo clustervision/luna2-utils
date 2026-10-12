@@ -333,6 +333,18 @@ def test_diff_implies_dump_in_the_parser():
     assert args.diff == "/var/log/luna/ldebug/node001/x"
 
 
+def test_global_options_work_before_and_after_the_area():
+    parse = ldebug.get_parser().parse_args
+    after = parse(["boot", "node001", "--dump", "--show-secrets", "-d", "/x", "--no-color"])
+    assert after.dump and after.show_secrets and after.dump_dir == "/x" and after.no_color and not after.raw
+    before = parse(["--dump", "-d", "/y", "boot", "node001", "--stage", "status"])
+    assert before.dump and before.dump_dir == "/y" and not before.show_secrets
+    plain = parse(["boot", "node001"])
+    assert not plain.dump and plain.dump_dir == ldebug.DUMP_DIR and not plain.verbose
+    api = parse(["api", "GET", "/boot", "--no-auth", "--raw"])
+    assert api.raw and api.no_auth and not api.dump
+
+
 def test_parser_builds_without_a_daemon():
     args = ldebug.get_parser().parse_args(["--dump", "boot", "node001", "--stage", "menu,status"])
     assert args.area == "boot" and args.stage == "menu,status" and args.dump

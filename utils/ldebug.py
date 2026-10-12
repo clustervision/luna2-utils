@@ -691,23 +691,31 @@ def cmd_api(args, rest):
 # parser and entry point
 # ---------------------------------------------------------------------------
 
+def add_global_options(parser, after_area=False):
+    """The options accepted before and after the area. After it they carry no default,
+    so an area's parser never resets what was already parsed in front of it."""
+    flag = {'default': argparse.SUPPRESS} if after_area else {}
+    parser.add_argument('-v', '--verbose', action='store_true', help='verbose mode', **flag)
+    parser.add_argument('--no-color', action='store_true', help='plain output, also implied by NO_COLOR', **flag)
+    parser.add_argument('--raw', action='store_true', help='print bodies untouched, without indentation', **flag)
+    parser.add_argument('--dump', action='store_true', help='also write every section to a directory', **flag)
+    parser.add_argument('-d', '--dump-dir', metavar='DIR', default=argparse.SUPPRESS if after_area else DUMP_DIR,
+                        help=f'where --dump writes (default {DUMP_DIR})')
+    parser.add_argument('--show-secrets', action='store_true', **flag,
+                        help='show tokens, passwords and secret contents instead of masking them')
+
+
 def get_parser():
     """Build the argument parser. Also used by shtab to generate completion."""
     parser = argparse.ArgumentParser(
         prog='ldebug',
         description='Replay and inspect what the luna2-daemon serves; exit 2 when a request failed.')
     parser.add_argument('-V', '--version', action='version', version=f'%(prog)s {__version__}')
-    parser.add_argument('-v', '--verbose', action='store_true', help='verbose mode')
-    parser.add_argument('--no-color', action='store_true', help='plain output, also implied by NO_COLOR')
-    parser.add_argument('--raw', action='store_true', help='print bodies untouched, without indentation')
-    parser.add_argument('--dump', action='store_true', help='also write every section to a directory')
-    parser.add_argument('-d', '--dump-dir', metavar='DIR', default=DUMP_DIR,
-                        help=f'where --dump writes (default {DUMP_DIR})')
-    parser.add_argument('--show-secrets', action='store_true',
-                        help='show tokens, passwords and secret contents instead of masking them')
+    add_global_options(parser)
     subparsers = parser.add_subparsers(dest='area', help='see details with <area> --help')
 
     sub = subparsers.add_parser('boot', help='replay the iPXE, discovery and install path of a node')
+    add_global_options(sub, after_area=True)
     sub.add_argument('node', help='node name')
     sub.add_argument('--stage', metavar='STAGE[,STAGE]', help=f"stages to run, default all: {','.join(STAGES)}")
     sub.add_argument('--mac', metavar='MAC', help='discover this MAC instead of the node\'s own')
@@ -717,6 +725,7 @@ def get_parser():
                      help='dump this run and compare it with an earlier dump: the newest other one of this node, or DIR')
 
     sub = subparsers.add_parser('api', help='one request against any daemon route')
+    add_global_options(sub, after_area=True)
     sub.add_argument('method', choices=['GET', 'POST'], help='HTTP method')
     sub.add_argument('route', help='route, e.g. /monitor/queue')
     sub.add_argument('-j', '--json', metavar='JSON|@FILE', help='request body as JSON text or @file')
