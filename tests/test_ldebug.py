@@ -296,6 +296,43 @@ def test_node_without_secrets_is_not_a_failure(tmp_path, capsys):
     assert "***len=3" in printed and "abc" not in printed
 
 
+def test_diff_compares_with_the_newest_earlier_dump_or_a_named_one(tmp_path, capsys):
+    def dump(stamp, files):
+        directory = tmp_path / "node001" / stamp
+        for relative, text in files.items():
+            (directory / relative).parent.mkdir(parents=True, exist_ok=True)
+            (directory / relative).write_text(text)
+        return str(directory)
+
+    first = dump("20261001-100000", {"21-variables.env": "NODE=node001\nROLES=\n", "22-prescript.sh": "echo pre\n",
+                                     "requests.log": "GET /boot 200\n", "diff.txt": "old diff\n"})
+    second = output(tmp_path)
+    second.directory = dump("20261002-100000", {"21-variables.env": "NODE=node001\nROLES=default\n",
+                                                "60-roles/default/unit": "[Unit]\n", "requests.log": "GET /boot 200 again\n"})
+    ldebug.stage_diff(second, "latest")
+    printed = capsys.readouterr().out
+    assert "1 changed, 1 added, 1 removed" in printed
+    assert "-ROLES=\n" in printed and "+ROLES=default" in printed
+    assert "added:   60-roles/default/unit" in printed and "removed: 22-prescript.sh" in printed
+    assert "requests.log" not in printed and "diff.txt" not in printed
+    written = (Path(second.directory) / "diff.txt").read_text()
+    assert "+ROLES=default" in written
+    assert ldebug.earlier_dump(second.directory, "latest") == first
+    assert ldebug.earlier_dump(second.directory, str(tmp_path / "nowhere")) == ""
+    ldebug.stage_diff(second, str(tmp_path / "nowhere"))
+    assert "is not a directory" in capsys.readouterr().out
+    only = output(tmp_path / "other", dump=True)
+    ldebug.stage_diff(only, "latest")
+    assert "no earlier dump" in capsys.readouterr().out
+
+
+def test_diff_implies_dump_in_the_parser():
+    args = ldebug.get_parser().parse_args(["boot", "node001", "--diff"])
+    assert args.diff == "latest" and not args.dump
+    args = ldebug.get_parser().parse_args(["boot", "node001", "--diff", "/var/log/luna/ldebug/node001/x"])
+    assert args.diff == "/var/log/luna/ldebug/node001/x"
+
+
 def test_parser_builds_without_a_daemon():
     args = ldebug.get_parser().parse_args(["--dump", "boot", "node001", "--stage", "menu,status"])
     assert args.area == "boot" and args.stage == "menu,status" and args.dump

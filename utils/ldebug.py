@@ -43,6 +43,7 @@ import base64
 import logging
 import getpass
 import argparse
+import difflib
 from datetime import datetime
 
 import requests
@@ -346,8 +347,9 @@ class Output():
             error_exit(f'cannot write to {base}; pick another directory with -d')
         return directory
 
-    def section(self, title, body, status=None, note=None, filename=None):
-        """Print one section; status 2xx is green, anything else red and remembered."""
+    def section(self, title, body, status=None, note=None, filename=None, display=None):
+        """Print one section; status 2xx is green, anything else red and remembered.
+        display, when given, is what the terminal gets instead of body; the dump always gets body."""
         header = _color(f' {title} ', 'white', 'on_blue', attrs=['bold'])
         if status is not None:
             ok = 200 <= status < 300
@@ -357,8 +359,9 @@ class Output():
             header += ' ' + _color(note, 'yellow')
         print(header)
         text = body if isinstance(body, str) else json.dumps(body, indent=2)
-        if text:
-            print(text if self.raw else '\n'.join('  ' + line for line in text.splitlines()))
+        shown = text if display is None else display
+        if shown:
+            print(shown if self.raw else '\n'.join('  ' + line for line in shown.splitlines()))
         print()
         if filename and self.directory:
             self.write(filename, text)
@@ -545,6 +548,8 @@ def cmd_boot(args, rest):
     if 'install' not in stages and any(stage in RENDER_STAGES for stage in stages):
         warn('roles, profiles, scripts and mounts are read from the render: adding the install stage')
         stages.append('install')
+    if args.diff:
+        args.dump = True
     out = Output(args)
     facts = node_facts(rest, args.node)
     render = None
@@ -567,11 +572,89 @@ def cmd_boot(args, rest):
         stage_secrets(rest, out, args.node)
     if 'status' in stages:
         stage_status(rest, out, args.node)
+    if args.diff:
+        stage_diff(out, args.diff)
     out.section('Requests', rest.request_log(), filename='requests.log')
     if out.directory:
         print(f'dumped to {out.directory}')
     if out.failed:
         sys.exit(2)
+
+
+def earlier_dump(current, wanted):
+    """The dump to compare with: the newest sibling of the current one, or the directory named."""
+    if wanted != 'latest':
+        return wanted if os.path.isdir(wanted) else ''
+    parent = os.path.dirname(current)
+    siblings = sorted(name for name in os.listdir(parent)
+                      if os.path.isdir(os.path.join(parent, name)) and name != os.path.basename(current))
+    return os.path.join(parent, siblings[-1]) if siblings else ''
+
+
+def dump_files(directory):
+    """Every file of a dump by its relative path, without the request log and an earlier
+    diff, which are about a run rather than about the node."""
+    files = {}
+    for root, _, names in os.walk(directory):
+        for name in names:
+            path = os.path.join(root, name)
+            relative = os.path.relpath(path, directory)
+            if relative not in ('requests.log', 'diff.txt'):
+                files[relative] = path
+    return files
+
+
+def compare_dumps(before, after):
+    """Unified diff of two dumps as (text, changed, added, removed)."""
+    old, new = dump_files(before), dump_files(after)
+    lines, changed = [], 0
+    for relative in sorted(set(old) | set(new)):
+        if relative not in old:
+            lines.append(f'added:   {relative}')
+            continue
+        if relative not in new:
+            lines.append(f'removed: {relative}')
+            continue
+        with open(old[relative], encoding='utf-8', errors='replace') as handle:
+            old_lines = handle.readlines()
+        with open(new[relative], encoding='utf-8', errors='replace') as handle:
+            new_lines = handle.readlines()
+        diff = list(difflib.unified_diff(old_lines, new_lines, f'{before}/{relative}', f'{after}/{relative}'))
+        if diff:
+            changed += 1
+            lines.append(''.join(diff).rstrip('\n'))
+    added = len(set(new) - set(old))
+    removed = len(set(old) - set(new))
+    return '\n'.join(lines), changed, added, removed
+
+
+def colour_diff(text):
+    """Colour the lines of a unified diff for the terminal."""
+    coloured = []
+    for line in text.splitlines():
+        if line.startswith('+++') or line.startswith('---'):
+            coloured.append(_color(line, attrs=['bold']))
+        elif line.startswith('+') or line.startswith('added:'):
+            coloured.append(_color(line, 'green'))
+        elif line.startswith('-') or line.startswith('removed:'):
+            coloured.append(_color(line, 'red'))
+        elif line.startswith('@@'):
+            coloured.append(_color(line, 'cyan'))
+        else:
+            coloured.append(line)
+    return '\n'.join(coloured)
+
+
+def stage_diff(out, wanted):
+    """Compare this run's dump with an earlier one, file by file."""
+    before = earlier_dump(out.directory, wanted)
+    if not before:
+        out.section('Diff', 'no earlier dump to compare with' if wanted == 'latest' else f'{wanted} is not a directory',
+                    note='skipped')
+        return
+    text, changed, added, removed = compare_dumps(before, out.directory)
+    note = (f'{changed} changed, {added} added, {removed} removed' if changed or added or removed else 'identical')
+    out.section(f'Diff {before} -> {out.directory}', text, note=note, filename='diff.txt', display=colour_diff(text))
 
 
 # ---------------------------------------------------------------------------
@@ -630,6 +713,8 @@ def get_parser():
     sub.add_argument('--mac', metavar='MAC', help='discover this MAC instead of the node\'s own')
     sub.add_argument('--allow-mutation', action='store_true',
                      help='allow discovery that can assign a MAC, create a node or restart DHCP')
+    sub.add_argument('--diff', nargs='?', const='latest', metavar='DIR',
+                     help='dump this run and compare it with an earlier dump: the newest other one of this node, or DIR')
 
     sub = subparsers.add_parser('api', help='one request against any daemon route')
     sub.add_argument('method', choices=['GET', 'POST'], help='HTTP method')

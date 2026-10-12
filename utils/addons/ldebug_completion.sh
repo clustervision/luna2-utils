@@ -29,7 +29,7 @@
 _shtab_ldebug_subparsers=('boot' 'api')
 
 _shtab_ldebug_option_strings=('-h' '--help' '-V' '--version' '-v' '--verbose' '--no-color' '--raw' '--dump' '-d' '--dump-dir' '--show-secrets')
-_shtab_ldebug_boot_option_strings=('-h' '--help' '--stage' '--mac' '--allow-mutation')
+_shtab_ldebug_boot_option_strings=('-h' '--help' '--stage' '--mac' '--allow-mutation' '--diff')
 _shtab_ldebug_api_option_strings=('-h' '--help' '-j' '--json' '--no-auth')
 
 
@@ -51,6 +51,7 @@ _shtab_ldebug___show_secrets_nargs=0
 _shtab_ldebug_boot__h_nargs=0
 _shtab_ldebug_boot___help_nargs=0
 _shtab_ldebug_boot___allow_mutation_nargs=0
+_shtab_ldebug_boot___diff_nargs=?
 _shtab_ldebug_api__h_nargs=0
 _shtab_ldebug_api___help_nargs=0
 _shtab_ldebug_api___no_auth_nargs=0
