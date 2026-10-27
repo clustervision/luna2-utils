@@ -87,6 +87,7 @@ import requests
 
 from utils.utils.ini import Ini
 from utils.utils.token import Token
+from utils.utils.interrupt import exit_on_interrupt
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1378,6 +1379,11 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """Entry point; Ctrl-C ends the run with a message instead of a traceback."""
+    return exit_on_interrupt(_main, argv)
+
+
+def _main(argv=None):
     args = parse_args(argv)
     logger.info('User %s ran => lconsole %s', getpass.getuser(), ' '.join(sys.argv[1:]))
 
@@ -1422,6 +1428,11 @@ def main(argv=None):
     )
     try:
         app.start()
+    except KeyboardInterrupt:
+        # a half-started SOL child must not outlive us
+        if app.sol is not None:
+            app.sol.stop()
+        raise
     except Exception as exc:
         logger.exception('starting console for %s failed', args.nodename)
         print(f'lconsole: {exc}', file=sys.stderr)

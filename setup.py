@@ -96,7 +96,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'bootutil = utils:bootutil',
+            'bootutil = utils.bootutil:main',
             'lchroot = utils.lchroot.__main__:main',
             'lchroot-legacy = utils.bash_runner:lchroot_legacy',
             'qemu-static = utils.qemu_static.__main__:main',
