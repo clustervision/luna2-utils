@@ -38,4 +38,13 @@ def lchroot_legacy() -> int:
     arguments as a real argv list — never a shell string — so there is no injection surface.
     """
     script = Path(__file__).resolve().parent / "lchroot-legacy"
-    return subprocess.call(["bash", str(script), *sys.argv[1:]])
+    proc = subprocess.Popen(["bash", str(script), *sys.argv[1:]])
+    while True:
+        try:
+            rc = proc.wait()
+            # killed by a signal: report it the shell way (128+N), not as a negative number
+            return 128 - rc if rc < 0 else rc
+        except KeyboardInterrupt:
+            # Ctrl-C reaches bash too; keep waiting so its EXIT trap can unmount the
+            # image — subprocess.call would SIGKILL bash here and skip that clean-up
+            continue

@@ -25,7 +25,7 @@ Setup file, will build the pip package for the project.
 
 __author__      = 'Sumit Sharma'
 __copyright__   = 'Copyright 2025, Luna2 Project[UTILS]'
-__license__     = 'GPL'
+__license__     = 'GPLv3'
 __version__     = '2.2'
 __maintainer__  = 'Sumit Sharma'
 __email__       = 'sumit.sharma@clustervision.com'
@@ -89,22 +89,22 @@ setup(
     download_url = f"https://{PRE}@gitlab.taurusgroup.one/api/v4/projects/14/packages/pypi/simple",
     # packages = find_packages(),
     packages = ['utils'],
-    license = "MIT",
+    license = "GPLv3",
     keywords = [
         "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "lrack", "slurm",
-        "Trinity", "ClusterVision", "Sumit", "Sumit Sharma"
+        "Trinity", "ClusterVision", "lconsole"
     ],
     entry_points={
         'console_scripts': [
-            'bootutil = utils:bootutil',
+            'bootutil = utils.bootutil:main',
             'lchroot = utils.lchroot.__main__:main',
             'lchroot-legacy = utils.bash_runner:lchroot_legacy',
             'qemu-static = utils.qemu_static.__main__:main',
             'lpower = utils.lpower:main',
             'lcluster = utils.lcluster:main',
-            'lslurm = utils.lslurm:main',
             'lnode = utils.lnode:main',
             'lrack = utils.lrack:main',
+            'lconsole = utils.lconsole:main',
             'trix-diag = utils.trinity_diagnosis:main'
         ]
     },
@@ -120,7 +120,7 @@ setup(
         'Development Status :: Beta',
         'Environment :: Luna 2 Command Line Utilities',
         'Intended Audience :: System Administrators',
-        'License :: MIT',
+        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
         'Operating System :: RockyLinux :: CentOS :: RedHat',
         'Programming Language :: Python',
         'Topic :: Trinity :: Luna'

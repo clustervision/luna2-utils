@@ -49,6 +49,7 @@ from urllib3.util import Retry
 from utils.utils.log import Log
 from utils.utils.ini import Ini
 from utils.utils.token import Token
+from utils.utils.interrupt import exit_on_interrupt
 
 global TMP_DIR
 TMP_DIR='/tmp'
@@ -69,6 +70,13 @@ CONF = Ini.read_ini(ini_file='/trinity/local/luna/utils/config/luna.ini')
 # ============================================================================
 
 def main(argv):
+    """
+    Entry point; Ctrl-C ends the run with a message instead of a traceback.
+    """
+    return exit_on_interrupt(_main, argv)
+
+
+def _main(argv):
     """
     The main method to initiate the script.
     """
