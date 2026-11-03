@@ -102,7 +102,6 @@ setup(
             'qemu-static = utils.qemu_static.__main__:main',
             'lpower = utils.lpower:main',
             'lcluster = utils.lcluster:main',
-            'lslurm = utils.lslurm:main',
             'lnode = utils.lnode:main',
             'lrack = utils.lrack:main',
             'lconsole = utils.lconsole:main',
