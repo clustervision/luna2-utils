@@ -98,13 +98,20 @@ def build_bwrap_argv(
         # Capability drop - load-bearing (see module docstring / skill.md L6).
         "--cap-drop",
         cap_drop,
-        # fakeuname so uname -r reports the image's target kernel, not the host's.
-        "--setenv",
-        "LD_PRELOAD",
-        FAKEUNAME_LIB,
     ]
     if image.kernelversion:
-        argv += ["--setenv", "FAKE_KERN", image.kernelversion]
+        # fakeuname so uname -r reports the image's target kernel, not the host's. It
+        # does nothing without FAKE_KERN, and an image that does not carry the library
+        # yet would print a loader error for every process, which package scripts that
+        # capture stderr take for output of their own.
+        argv += [
+            "--setenv",
+            "LD_PRELOAD",
+            FAKEUNAME_LIB,
+            "--setenv",
+            "FAKE_KERN",
+            image.kernelversion,
+        ]
     argv += [
         # Pin TMPDIR inside the image: a host TMPDIR (e.g. a tool's /tmp/xxx) leaks
         # through the inherited env and breaks dnf/librepo with "No such file or
