@@ -117,7 +117,7 @@ def test_missing_kernelversion_omits_fake_kern() -> None:
     img = ResolvedImage(name="x", path=Path("/img"), kernelversion=None)
     argv = build_bwrap_argv(img, read_only=False)
     assert "FAKE_KERN" not in " ".join(argv)
-    assert "--setenv LD_PRELOAD libluna-fakeuname.so" in " ".join(argv)
+    assert "LD_PRELOAD" not in " ".join(argv)
 
 
 @pytest.mark.parametrize(
@@ -246,7 +246,7 @@ def test_prop_hardening_prefix_invariant(
 
     Private PID/UTS namespaces, the die-with-parent teardown (ADR 0006), the namespaced
     ``/proc`` + ``/dev``, the read-only ``/sys``, the ``/run`` tmpfs, the TMPDIR pin
-    (L13), fakeuname, and ``--chdir /`` must hold regardless of name/path/kernel/mode/
+    (L13), and ``--chdir /`` must hold regardless of name/path/kernel/mode/
     command. Checked on the flag prefix so a command repeating a token cannot fake it.
     """
     argv = build_bwrap_argv(img, read_only=read_only, command=command)
@@ -260,7 +260,6 @@ def test_prop_hardening_prefix_invariant(
     assert _adjacent(flags, "--tmpfs", "/run")
     assert _adjacent(flags, "--chdir", "/")
     assert _setenv(flags, "TMPDIR") == "/tmp"
-    assert _setenv(flags, "LD_PRELOAD") == "libluna-fakeuname.so"
 
 
 @given(img=_resolved, read_only=st.booleans(), command=_command)
@@ -290,8 +289,11 @@ def test_prop_fake_kern_iff_kernelversion(
 
     A single equality covers both branches: ``_setenv`` returns None when no
     ``--setenv FAKE_KERN`` triple exists, which equals ``img.kernelversion`` when that is
-    None too.
+    None too. The fakeuname preload follows it, so an image that does not carry the
+    library yet gets no loader error on every process.
     """
     argv = build_bwrap_argv(img, read_only=read_only, command=command)
     flags, _ = _split_command(argv, command)
     assert _setenv(flags, "FAKE_KERN") == img.kernelversion
+    preload = _setenv(flags, "LD_PRELOAD")
+    assert (preload == "libluna-fakeuname.so") == bool(img.kernelversion)
