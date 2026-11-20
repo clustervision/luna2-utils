@@ -91,7 +91,7 @@ setup(
     packages = ['utils'],
     license = "GPLv3",
     keywords = [
-        "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "lrack", "slurm",
+        "luna", "utils", "lchroot", "bootutil", "lcluster", "lpower", "lrack", "ldebug", "slurm",
         "Trinity", "ClusterVision", "lconsole"
     ],
     entry_points={
@@ -104,6 +104,7 @@ setup(
             'lcluster = utils.lcluster:main',
             'lnode = utils.lnode:main',
             'lrack = utils.lrack:main',
+            'ldebug = utils.ldebug:main',
             'lconsole = utils.lconsole:main',
             'trix-diag = utils.trinity_diagnosis:main'
         ]

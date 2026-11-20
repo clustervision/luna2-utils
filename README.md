@@ -19,7 +19,9 @@ images, node consoles, power, racks and cluster health.
 - Export and import of the cluster configuration and of OS images.
 - High-availability master state of the controllers.
 - A support report with logs, system and cluster information in one archive.
-- Bash completion for `lchroot`, `lconsole` and `lrack`.
+- Replay of what the daemon serves a booting node, stage by stage, with the parts of
+  the installer shown separately and optionally dumped as files.
+- Bash completion for `lchroot`, `lconsole`, `lrack` and `ldebug`.
 
 ## Commands
 
@@ -29,6 +31,7 @@ images, node consoles, power, racks and cluster health.
 | `lconsole` | Interactive Serial-over-LAN console of a node, over IPMI or Redfish |
 | `lpower` | Power status, on, off, reset, cycle and identify, for nodes, a group or a rack |
 | `lrack` | Racks and the placement of devices in them, as in the TrinityX Rack View |
+| `ldebug` | Replay the iPXE, discovery and install path of a node, or call any daemon route |
 | `lcluster` | Health and status of the cluster nodes: power, Luna install state and Slurm |
 | `lnode` | List or clear the BMC system event log of nodes |
 | `bootutil` | List, read or set the boot order of a node over Redfish |
@@ -64,8 +67,8 @@ The design decisions behind lchroot are recorded in [docs/lchroot/](docs/lchroot
 ## Configuration
 
 The utilities read the daemon address and API account from
-`/trinity/local/luna/utils/config/luna.ini` (`lrack` also accepts another file through
-the `LRACK_INI` environment variable).
+`/trinity/local/luna/utils/config/luna.ini` (`lrack` and `ldebug` also accept another file through
+the `LRACK_INI` and `LDEBUG_INI` environment variables).
 
 **On a TrinityX cluster, the TrinityX installer writes a fresh
 `/trinity/local/luna/utils/config/luna.ini` on every run and replaces whatever the file
@@ -89,6 +92,7 @@ This project is a part of luna project. Luna2 Utils have all kind of necessary u
 6. lrack <br />
 7. lconsole <br />
 8. trinity_diagnosis <br />
+9. ldebug <br />
 
 After installing the Luna 2 Utils via pip, all those commands will be available for further use.<br />
 
