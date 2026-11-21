@@ -20,4 +20,14 @@
 include:
   - project: 'ClusterVision/gitlab-cicd-pipelines'
     file: '/pip-package-pipeline.yml'
-    ref: 'main'
+    # Until the RPM jobs are merged into the pipelines' main branch; drops out with that merge.
+    ref: 'trix-2181-pip-rpm'
+    inputs:
+      RPM_REPO: "luna2"
+      RPM_SUMMARY: "Luna 2 utilities"
+      # The wheel carries qemu interpreters that run on this architecture.
+      RPM_ARCH: "x86_64"
+      # The utilities the stack links into /usr/sbin by their file, which has to run as it is.
+      RPM_EXECUTABLE: "utils/lexport.py utils/lmaster.py utils/lsosreport utils/trinity_diagnosis.py"
+      # Modules that load without the installation's own luna.ini.
+      RPM_CHECK: "/trinity/local/python/bin/python3 -c 'import utils.lchroot, utils.lcluster, utils.lnode, utils.qemu_static'"
