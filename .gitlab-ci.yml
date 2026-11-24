@@ -29,5 +29,7 @@ include:
       RPM_ARCH: "x86_64"
       # The utilities the stack links into /usr/sbin by their file, which has to run as it is.
       RPM_EXECUTABLE: "utils/lexport.py utils/lmaster.py utils/lsosreport utils/trinity_diagnosis.py"
+      # The installation's answers: a machine without them gets the stack's package first.
+      RPM_SITE_ANSWERS: "/trinity/trinityx-combined/site/group_vars/all.yml"
       # Modules that load without the installation's own luna.ini.
       RPM_CHECK: "/trinity/local/python/bin/python3 -c 'import utils.lchroot, utils.lcluster, utils.lnode, utils.qemu_static'"
